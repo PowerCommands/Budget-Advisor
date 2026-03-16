@@ -1,0 +1,286 @@
+html, body {
+    font-family: var(--mud-typography-default-family);
+    background: var(--mud-palette-background);
+    color: var(--mud-palette-text-primary);
+}
+
+body {
+    margin: 0;
+}
+
+h1:focus {
+    outline: none;
+}
+
+h1, h2, h3 {
+    letter-spacing: -0.02em;
+}
+
+a, .btn-link {
+    color: var(--mud-palette-primary);
+}
+
+.btn-primary {
+    color: #fff;
+    background-color: var(--mud-palette-primary);
+    border-color: var(--mud-palette-primary);
+}
+
+.btn-outline-primary {
+    color: var(--mud-palette-primary);
+    border-color: var(--mud-palette-primary);
+}
+
+.btn-outline-primary:hover,
+.btn-primary:hover {
+    background-color: var(--mud-palette-primary-darken);
+    border-color: var(--mud-palette-primary-darken);
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-select:focus, .form-check-input:focus {
+    box-shadow: 0 0 0 0.12rem rgba(255, 255, 255, 0.8), 0 0 0 0.28rem rgba(89, 74, 226, 0.24);
+}
+
+.valid.modified:not([type=checkbox]) {
+    outline: 1px solid #2f7d32;
+}
+
+.invalid {
+    outline: 1px solid var(--mud-palette-error);
+}
+
+.validation-message {
+    color: var(--mud-palette-error);
+    font-size: 0.9rem;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.page-header p {
+    margin: 0.4rem 0 0;
+    color: var(--mud-palette-text-secondary);
+    max-width: 60ch;
+}
+
+.card-panel,
+.placeholder-panel {
+    background: var(--mud-palette-surface);
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 1.25rem;
+    padding: 1.25rem;
+    box-shadow: var(--mud-elevation-2);
+}
+
+.placeholder-panel {
+    min-height: 12rem;
+}
+
+.stack-grid {
+    display: grid;
+    gap: 1rem;
+}
+
+.two-up {
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+}
+
+.three-up {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.section-title-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: baseline;
+    margin-bottom: 1rem;
+}
+
+.report-filter-row {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.section-note,
+.empty-state {
+    color: var(--mud-palette-text-secondary);
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.85rem;
+}
+
+.stat-card {
+    background: color-mix(in srgb, var(--mud-palette-surface) 88%, var(--mud-palette-background));
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 1rem;
+    padding: 1rem;
+}
+
+.stat-card-income {
+    background: color-mix(in srgb, var(--mud-palette-primary) 12%, var(--mud-palette-surface));
+}
+
+.stat-card span {
+    display: block;
+    color: var(--mud-palette-text-secondary);
+    margin-bottom: 0.45rem;
+}
+
+.stat-card strong {
+    font-size: 1.25rem;
+}
+
+.stat-card small {
+    display: block;
+    margin-top: 0.4rem;
+    color: var(--mud-palette-text-secondary);
+}
+
+.stat-card-balance-ok {
+    background: color-mix(in srgb, var(--mud-palette-success) 16%, var(--mud-palette-surface));
+    border-color: color-mix(in srgb, var(--mud-palette-success) 40%, var(--mud-palette-lines-default));
+}
+
+.stat-card-balance-nok {
+    background: color-mix(in srgb, var(--mud-palette-action-disabled-background) 70%, var(--mud-palette-surface));
+    border-color: color-mix(in srgb, var(--mud-palette-action-disabled) 45%, var(--mud-palette-lines-default));
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+}
+
+.chip {
+    background: color-mix(in srgb, var(--mud-palette-primary) 12%, var(--mud-palette-surface));
+    border-radius: 999px;
+    padding: 0.55rem 0.9rem;
+}
+
+.button-row {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.settings-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 18.5rem;
+}
+
+.settings-card .mud-stack {
+    flex: 1 1 auto;
+}
+
+.settings-card .button-row,
+.settings-card .mud-upload-label {
+    margin-top: auto;
+}
+
+.mud-upload-label {
+    display: inline-flex;
+}
+
+.status-banner {
+    margin-bottom: 1rem;
+    padding: 0.9rem 1rem;
+    border-radius: 1rem;
+    background: color-mix(in srgb, var(--mud-palette-info) 12%, var(--mud-palette-surface));
+    border: 1px solid color-mix(in srgb, var(--mud-palette-info) 35%, var(--mud-palette-lines-default));
+}
+
+.app-table {
+    margin-bottom: 0;
+}
+
+.app-table thead th {
+    color: var(--mud-palette-text-secondary);
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#blazor-error-ui {
+    color-scheme: light only;
+    background: #fff1d6;
+    bottom: 0;
+    box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 0.75rem;
+    top: 0.5rem;
+}
+
+.loading-progress {
+    position: absolute;
+    display: block;
+    width: 8rem;
+    height: 8rem;
+    inset: 20vh 0 auto 0;
+    margin: 0 auto 0 auto;
+}
+
+.loading-progress circle {
+    fill: none;
+    stroke: #e0e0e0;
+    stroke-width: 0.6rem;
+    transform-origin: 50% 50%;
+    transform: rotate(-90deg);
+}
+
+.loading-progress circle:last-child {
+    stroke: var(--mud-palette-primary);
+    stroke-dasharray: calc(3.141 * var(--blazor-load-percentage, 0%) * 0.8), 500%;
+    transition: stroke-dasharray 0.05s ease-in-out;
+}
+
+.loading-progress-text {
+    position: absolute;
+    text-align: center;
+    font-weight: bold;
+    inset: calc(20vh + 3.25rem) 0 auto 0.2rem;
+}
+
+.loading-progress-text:after {
+    content: var(--blazor-load-percentage-text, "Loading");
+}
+
+@media (max-width: 899px) {
+    .top-bar {
+        padding-top: 1rem;
+    }
+
+    .page-content {
+        padding-top: 1rem;
+    }
+}

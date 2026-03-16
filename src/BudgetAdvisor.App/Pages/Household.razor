@@ -1,0 +1,420 @@
+@page "/household"
+@using System.ComponentModel.DataAnnotations
+@implements IDisposable
+@inject ApplicationState AppState
+@inject IDialogService DialogService
+@inject LocalizationService Localizer
+
+<PageTitle>Budget Advisor - @Localizer["nav.household"]</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>@Localizer["household.title"]</h1>
+        <p>@Localizer["household.subtitle"]</p>
+    </div>
+</div>
+
+<div class="stack-grid">
+    <section class="card-panel">
+        <h2>@Localizer["household.addMember"]</h2>
+        <EditForm Model="memberForm" OnValidSubmit="HandleAddMemberAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div>
+                    <label class="form-label">@Localizer["field.name"]</label>
+                    <InputText class="form-control" @bind-Value="memberForm.Name" />
+                    <ValidationMessage For="() => memberForm.Name" />
+                </div>
+            </div>
+            <button class="btn btn-primary" type="submit">@Localizer["action.addMember"]</button>
+        </EditForm>
+    </section>
+
+    <section class="card-panel">
+        <h2>@Localizer["household.members"]</h2>
+        @if (AppState.Data.Members.Count == 0)
+        {
+            <p class="empty-state">@Localizer["household.noMembers"]</p>
+        }
+        else
+        {
+            <div class="chip-list">
+                @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                {
+                    <span class="chip">@member.Name</span>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+<div class="stack-grid three-up">
+    <section class="card-panel">
+        <h2>@Localizer["household.oneTimeIncome"]</h2>
+        <EditForm EditContext="oneTimeIncomeEditContext" OnValidSubmit="HandleAddOneTimeIncomeAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div>
+                    <label class="form-label">@Localizer["field.member"]</label>
+                    <InputSelect class="form-select" @bind-Value="oneTimeIncomeForm.MemberId">
+                        <option value="">@Localizer["field.selectMember"]</option>
+                        @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                        {
+                            <option value="@member.Id">@member.Name</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => oneTimeIncomeForm.MemberId" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.amount"]</label>
+                    <InputNumber class="form-control" @bind-Value="oneTimeIncomeForm.Amount" />
+                    <ValidationMessage For="() => oneTimeIncomeForm.Amount" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.year"]</label>
+                    <InputNumber class="form-control" @bind-Value="oneTimeIncomeForm.Year" />
+                    <ValidationMessage For="() => oneTimeIncomeForm.Year" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.month"]</label>
+                    <InputNumber class="form-control" @bind-Value="oneTimeIncomeForm.Month" />
+                    <ValidationMessage For="() => oneTimeIncomeForm.Month" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.type"]</label>
+                    <InputSelect class="form-select" @bind-Value="oneTimeIncomeForm.Type">
+                        @foreach (var incomeType in Enum.GetValues<IncomeType>())
+                        {
+                            <option value="@incomeType">@Localizer[$"incomeType.{incomeType}"]</option>
+                        }
+                    </InputSelect>
+                </div>
+            </div>
+            <button class="btn btn-primary" disabled="@(!HasMembers)" type="submit">@Localizer["action.addIncome"]</button>
+        </EditForm>
+    </section>
+
+    <section class="card-panel">
+        <h2>@Localizer["household.monthlySalary"]</h2>
+        <EditForm EditContext="monthlySalaryEditContext" OnValidSubmit="HandleAddMonthlySalaryAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div>
+                    <label class="form-label">@Localizer["field.member"]</label>
+                    <InputSelect class="form-select" @bind-Value="monthlySalaryForm.MemberId">
+                        <option value="">@Localizer["field.selectMember"]</option>
+                        @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                        {
+                            <option value="@member.Id">@member.Name</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => monthlySalaryForm.MemberId" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.amount"]</label>
+                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.Amount" />
+                    <ValidationMessage For="() => monthlySalaryForm.Amount" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.startYear"]</label>
+                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.StartYear" />
+                    <ValidationMessage For="() => monthlySalaryForm.StartYear" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.startMonth"]</label>
+                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.StartMonth" />
+                    <ValidationMessage For="() => monthlySalaryForm.StartMonth" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.endYear"]</label>
+                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.EndYear" />
+                    <ValidationMessage For="() => monthlySalaryForm.EndYear" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.endMonth"]</label>
+                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.EndMonth" />
+                    <ValidationMessage For="() => monthlySalaryForm.EndMonth" />
+                </div>
+            </div>
+            <button class="btn btn-primary" disabled="@(!HasMembers)" type="submit">@Localizer["action.generateSalary"]</button>
+        </EditForm>
+    </section>
+
+    <section class="card-panel">
+        <h2>@Localizer["household.yearlyIncome"]</h2>
+        <EditForm EditContext="yearlyIncomeEditContext" OnValidSubmit="HandleAddYearlyIncomeAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div>
+                    <label class="form-label">@Localizer["field.member"]</label>
+                    <InputSelect class="form-select" @bind-Value="yearlyIncomeForm.MemberId">
+                        <option value="">@Localizer["field.selectMember"]</option>
+                        @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                        {
+                            <option value="@member.Id">@member.Name</option>
+                        }
+                    </InputSelect>
+                    <ValidationMessage For="() => yearlyIncomeForm.MemberId" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.amount"]</label>
+                    <InputNumber class="form-control" @bind-Value="yearlyIncomeForm.Amount" />
+                    <ValidationMessage For="() => yearlyIncomeForm.Amount" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.year"]</label>
+                    <InputNumber class="form-control" @bind-Value="yearlyIncomeForm.Year" />
+                    <ValidationMessage For="() => yearlyIncomeForm.Year" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.type"]</label>
+                    <InputSelect class="form-select" @bind-Value="yearlyIncomeForm.Type">
+                        @foreach (var incomeType in Enum.GetValues<IncomeType>())
+                        {
+                            <option value="@incomeType">@Localizer[$"incomeType.{incomeType}"]</option>
+                        }
+                    </InputSelect>
+                </div>
+            </div>
+            <button class="btn btn-primary" disabled="@(!HasMembers)" type="submit">@Localizer["action.generateYearlyIncome"]</button>
+        </EditForm>
+    </section>
+</div>
+
+<section class="card-panel mt-4">
+    <div class="section-title-row">
+        <h2>@Localizer["household.incomeEntries"]</h2>
+        <span class="section-note">@Localizer["household.incomeEntriesNote"]</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table app-table">
+            <thead>
+                <tr>
+                    <th>@Localizer["field.member"]</th>
+                    <th>@Localizer["field.type"]</th>
+                    <th>@Localizer["field.year"]</th>
+                    <th>@Localizer["field.month"]</th>
+                    <th>@Localizer["field.amount"]</th>
+                    <th>@Localizer["field.actions"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var income in AppState.Data.IncomeRecords.OrderByDescending(record => record.Year).ThenByDescending(record => record.Month))
+                {
+                    <tr>
+                        <td>@GetMemberName(income.MemberId)</td>
+                        <td>@Localizer[$"incomeType.{income.Type}"]</td>
+                        <td>@income.Year</td>
+                        <td>@Localizer[$"month.{income.Month}"]</td>
+                        <td>@AppState.FormatCurrency(income.Amount)</td>
+                        <td>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Color="Color.Error"
+                                           Size="Size.Small"
+                                           OnClick="@(() => HandleDeleteIncomeAsync(income))" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    private readonly MemberFormModel memberForm = new();
+    private OneTimeIncomeFormModel oneTimeIncomeForm = new();
+    private MonthlySalaryFormModel monthlySalaryForm = new();
+    private YearlyIncomeFormModel yearlyIncomeForm = new();
+    private EditContext oneTimeIncomeEditContext = default!;
+    private EditContext monthlySalaryEditContext = default!;
+    private EditContext yearlyIncomeEditContext = default!;
+
+    private bool HasMembers => AppState.Data.Members.Count > 0;
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += HandleChanged;
+        Localizer.Changed += HandleChanged;
+        ResetIncomeForms();
+    }
+
+    private async Task HandleAddMemberAsync()
+    {
+        await AppState.AddMemberAsync(memberForm.Name);
+        memberForm.Name = string.Empty;
+    }
+
+    private async Task HandleAddOneTimeIncomeAsync()
+    {
+        await AppState.AddOneTimeIncomeAsync(oneTimeIncomeForm.MemberId!.Value, oneTimeIncomeForm.Amount, oneTimeIncomeForm.Year, oneTimeIncomeForm.Month, oneTimeIncomeForm.Type);
+        oneTimeIncomeForm = new OneTimeIncomeFormModel();
+        ResetIncomeForms();
+    }
+
+    private async Task HandleAddMonthlySalaryAsync()
+    {
+        await AppState.AddMonthlySalaryAsync(monthlySalaryForm.MemberId!.Value, monthlySalaryForm.Amount, monthlySalaryForm.StartYear, monthlySalaryForm.StartMonth, monthlySalaryForm.EndYear, monthlySalaryForm.EndMonth);
+        monthlySalaryForm = new MonthlySalaryFormModel();
+        ResetIncomeForms();
+    }
+
+    private async Task HandleAddYearlyIncomeAsync()
+    {
+        await AppState.AddYearlyIncomeAsync(yearlyIncomeForm.MemberId!.Value, yearlyIncomeForm.Amount, yearlyIncomeForm.Year, yearlyIncomeForm.Type);
+        yearlyIncomeForm = new YearlyIncomeFormModel();
+        ResetIncomeForms();
+    }
+
+    private async Task HandleDeleteIncomeAsync(IncomeEntry income)
+    {
+        if (income.SeriesId.HasValue)
+        {
+            var seriesParameters = new DialogParameters<SeriesDeleteDialog>
+            {
+                { dialog => dialog.Title, Localizer["dialog.deleteSeriesTitle"] },
+                { dialog => dialog.Message, Localizer["household.deleteIncomeSeriesMessage"] },
+                { dialog => dialog.SingleText, Localizer["action.deleteOne"] },
+                { dialog => dialog.SeriesText, Localizer["action.deleteSeries"] },
+                { dialog => dialog.CancelText, Localizer["action.cancel"] }
+            };
+
+            var seriesDialog = await DialogService.ShowAsync<SeriesDeleteDialog>(Localizer["dialog.deleteSeriesTitle"], seriesParameters);
+            if (seriesDialog is null)
+            {
+                return;
+            }
+
+            var seriesResult = await seriesDialog.Result;
+            if (seriesResult?.Canceled ?? true)
+            {
+                return;
+            }
+
+            var removeSeries = string.Equals(seriesResult.Data?.ToString(), "series", StringComparison.OrdinalIgnoreCase);
+            await AppState.RemoveIncomeAsync(income.Id, removeSeries);
+            return;
+        }
+
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, Localizer["household.deleteIncomeMessage"] },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveIncomeAsync(income.Id, false);
+    }
+
+    private void ResetIncomeForms()
+    {
+        var year = DateTime.Today.Year;
+        var month = DateTime.Today.Month;
+
+        oneTimeIncomeForm.Year = year;
+        oneTimeIncomeForm.Month = month;
+        monthlySalaryForm.StartYear = year;
+        monthlySalaryForm.StartMonth = month;
+        monthlySalaryForm.EndYear = year;
+        monthlySalaryForm.EndMonth = month;
+        yearlyIncomeForm.Year = year;
+
+        oneTimeIncomeEditContext = new EditContext(oneTimeIncomeForm);
+        monthlySalaryEditContext = new EditContext(monthlySalaryForm);
+        yearlyIncomeEditContext = new EditContext(yearlyIncomeForm);
+    }
+
+    private string GetMemberName(Guid memberId) =>
+        AppState.Data.Members.FirstOrDefault(member => member.Id == memberId)?.Name ?? Localizer["common.unknown"];
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AppState.Changed -= HandleChanged;
+        Localizer.Changed -= HandleChanged;
+    }
+
+    private sealed class MemberFormModel
+    {
+        [Required(ErrorMessage = "Name is required.")]
+        [StringLength(100, ErrorMessage = "Name must be 100 characters or fewer.")]
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private sealed class OneTimeIncomeFormModel
+    {
+        [Required(ErrorMessage = "Member is required.")]
+        public Guid? MemberId { get; set; }
+
+        [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Amount must be greater than zero.")]
+        public decimal Amount { get; set; }
+
+        [Range(2000, 2100, ErrorMessage = "Year must be between 2000 and 2100.")]
+        public int Year { get; set; }
+
+        [Range(1, 12, ErrorMessage = "Month must be between 1 and 12.")]
+        public int Month { get; set; }
+
+        public IncomeType Type { get; set; } = IncomeType.Salary;
+    }
+
+    private sealed class MonthlySalaryFormModel : IValidatableObject
+    {
+        [Required(ErrorMessage = "Member is required.")]
+        public Guid? MemberId { get; set; }
+
+        [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Amount must be greater than zero.")]
+        public decimal Amount { get; set; }
+
+        [Range(2000, 2100, ErrorMessage = "Start year must be between 2000 and 2100.")]
+        public int StartYear { get; set; }
+
+        [Range(1, 12, ErrorMessage = "Start month must be between 1 and 12.")]
+        public int StartMonth { get; set; }
+
+        [Range(2000, 2100, ErrorMessage = "End year must be between 2000 and 2100.")]
+        public int EndYear { get; set; }
+
+        [Range(1, 12, ErrorMessage = "End month must be between 1 and 12.")]
+        public int EndMonth { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (new DateOnly(EndYear, EndMonth, 1) < new DateOnly(StartYear, StartMonth, 1))
+            {
+                yield return new ValidationResult("End period must be the same as or later than the start period.", [nameof(EndYear), nameof(EndMonth)]);
+            }
+        }
+    }
+
+    private sealed class YearlyIncomeFormModel
+    {
+        [Required(ErrorMessage = "Member is required.")]
+        public Guid? MemberId { get; set; }
+
+        [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Amount must be greater than zero.")]
+        public decimal Amount { get; set; }
+
+        [Range(2000, 2100, ErrorMessage = "Year must be between 2000 and 2100.")]
+        public int Year { get; set; }
+
+        public IncomeType Type { get; set; } = IncomeType.Other;
+    }
+}

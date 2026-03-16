@@ -1,0 +1,411 @@
+@page "/expenses"
+@using System.ComponentModel.DataAnnotations
+@implements IDisposable
+@inject ApplicationState AppState
+@inject IDialogService DialogService
+@inject LocalizationService Localizer
+
+<PageTitle>Budget Advisor - @Localizer["nav.expenses"]</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>@Localizer["expenses.title"]</h1>
+        <p>@Localizer["expenses.subtitle"]</p>
+    </div>
+    <button class="btn btn-outline-primary" @onclick="HandleGenerateExpensesAsync">@Localizer["action.generateMissingExpenses"]</button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(statusMessage))
+{
+    <div class="status-banner">@statusMessage</div>
+}
+
+<div class="stack-grid two-up">
+    <section class="card-panel">
+        <h2>@Localizer["expenses.oneTimeExpense"]</h2>
+        <EditForm EditContext="oneTimeExpenseEditContext" OnValidSubmit="HandleAddExpenseAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div>
+                    <label class="form-label">@Localizer["field.description"]</label>
+                    <InputText class="form-control" @bind-Value="oneTimeExpenseForm.Description" />
+                    <ValidationMessage For="() => oneTimeExpenseForm.Description" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.amount"]</label>
+                    <InputNumber class="form-control" @bind-Value="oneTimeExpenseForm.Amount" />
+                    <ValidationMessage For="() => oneTimeExpenseForm.Amount" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.year"]</label>
+                    <InputNumber class="form-control" @bind-Value="oneTimeExpenseForm.Year" />
+                    <ValidationMessage For="() => oneTimeExpenseForm.Year" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.month"]</label>
+                    <InputNumber class="form-control" @bind-Value="oneTimeExpenseForm.Month" />
+                    <ValidationMessage For="() => oneTimeExpenseForm.Month" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.category"]</label>
+                    <InputSelect class="form-select" @bind-Value="oneTimeExpenseForm.Category">
+                        @foreach (var category in Enum.GetValues<ExpenseCategory>())
+                        {
+                            <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.subcategory"]</label>
+                    <InputText class="form-control" @bind-Value="oneTimeExpenseForm.Subcategory" list="one-time-subcategories" />
+                    <datalist id="one-time-subcategories">
+                        @foreach (var subcategory in GetSubcategorySuggestions(oneTimeExpenseForm.Category))
+                        {
+                            <option value="@subcategory"></option>
+                        }
+                    </datalist>
+                </div>
+            </div>
+            <button class="btn btn-primary" type="submit">@Localizer["action.addExpense"]</button>
+        </EditForm>
+    </section>
+
+    <section class="card-panel">
+        <h2>@Localizer["expenses.subscription"]</h2>
+        <EditForm EditContext="subscriptionEditContext" OnValidSubmit="HandleAddSubscriptionAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+            <div class="form-grid">
+                <div>
+                    <label class="form-label">@Localizer["field.name"]</label>
+                    <InputText class="form-control" @bind-Value="subscriptionForm.Name" />
+                    <ValidationMessage For="() => subscriptionForm.Name" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.amount"]</label>
+                    <InputNumber class="form-control" @bind-Value="subscriptionForm.Amount" />
+                    <ValidationMessage For="() => subscriptionForm.Amount" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.intervalMonths"]</label>
+                    <InputNumber class="form-control" @bind-Value="subscriptionForm.IntervalMonths" />
+                    <ValidationMessage For="() => subscriptionForm.IntervalMonths" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.startYear"]</label>
+                    <InputNumber class="form-control" @bind-Value="subscriptionForm.StartYear" />
+                    <ValidationMessage For="() => subscriptionForm.StartYear" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.startMonth"]</label>
+                    <InputNumber class="form-control" @bind-Value="subscriptionForm.StartMonth" />
+                    <ValidationMessage For="() => subscriptionForm.StartMonth" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.endYearOptional"]</label>
+                    <InputNumber class="form-control" @bind-Value="subscriptionForm.EndYear" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.endMonthOptional"]</label>
+                    <InputNumber class="form-control" @bind-Value="subscriptionForm.EndMonth" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.category"]</label>
+                    <InputSelect class="form-select" @bind-Value="subscriptionForm.Category">
+                        @foreach (var category in Enum.GetValues<ExpenseCategory>())
+                        {
+                            <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.subcategory"]</label>
+                    <InputText class="form-control" @bind-Value="subscriptionForm.Subcategory" list="subscription-subcategories" />
+                    <datalist id="subscription-subcategories">
+                        @foreach (var subcategory in GetSubcategorySuggestions(subscriptionForm.Category))
+                        {
+                            <option value="@subcategory"></option>
+                        }
+                    </datalist>
+                </div>
+            </div>
+            <button class="btn btn-primary" type="submit">@Localizer["action.addSubscription"]</button>
+        </EditForm>
+    </section>
+</div>
+
+<div class="stack-grid two-up mt-4">
+    <section class="card-panel">
+        <h2>@Localizer["expenses.subscriptions"]</h2>
+        <div class="table-responsive">
+            <table class="table app-table">
+                <thead>
+                    <tr>
+                        <th>@Localizer["field.name"]</th>
+                        <th>@Localizer["field.category"]</th>
+                        <th>@Localizer["field.amount"]</th>
+                        <th>@Localizer["field.intervalMonths"]</th>
+                        <th>@Localizer["field.start"]</th>
+                        <th>@Localizer["field.end"]</th>
+                        <th>@Localizer["field.actions"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var subscription in AppState.Data.Subscriptions.OrderBy(item => item.Name))
+                    {
+                        <tr>
+                            <td>@subscription.Name</td>
+                            <td>@GetCategoryDisplay(subscription.Category, subscription.Subcategory)</td>
+                            <td>@AppState.FormatCurrency(subscription.Amount)</td>
+                            <td>@subscription.IntervalMonths</td>
+                            <td>@GetMonthYearLabel(subscription.StartYear, subscription.StartMonth)</td>
+                            <td>@GetEndLabel(subscription)</td>
+                            <td>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Color="Color.Error"
+                                               Size="Size.Small"
+                                               OnClick="@(() => HandleDeleteSubscriptionAsync(subscription))" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card-panel">
+        <h2>@Localizer["expenses.expenseEntries"]</h2>
+        <div class="table-responsive">
+            <table class="table app-table">
+                <thead>
+                    <tr>
+                        <th>@Localizer["field.description"]</th>
+                        <th>@Localizer["field.category"]</th>
+                        <th>@Localizer["field.year"]</th>
+                        <th>@Localizer["field.month"]</th>
+                        <th>@Localizer["field.amount"]</th>
+                        <th>@Localizer["field.actions"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var expense in AppState.Data.ExpenseRecords.OrderByDescending(record => record.Year).ThenByDescending(record => record.Month))
+                    {
+                        <tr>
+                            <td>@expense.Description</td>
+                            <td>@GetCategoryDisplay(expense.Category, expense.Subcategory)</td>
+                            <td>@expense.Year</td>
+                            <td>@Localizer[$"month.{expense.Month}"]</td>
+                            <td>@AppState.FormatCurrency(expense.Amount)</td>
+                            <td>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Color="Color.Error"
+                                               Size="Size.Small"
+                                               OnClick="@(() => HandleDeleteExpenseAsync(expense))" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+@code {
+    private OneTimeExpenseFormModel oneTimeExpenseForm = new();
+    private SubscriptionExpenseFormModel subscriptionForm = new();
+    private EditContext oneTimeExpenseEditContext = default!;
+    private EditContext subscriptionEditContext = default!;
+    private string? statusMessage;
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += HandleChanged;
+        Localizer.Changed += HandleChanged;
+        ResetExpenseForms();
+    }
+
+    private async Task HandleAddExpenseAsync()
+    {
+        await AppState.AddOneTimeExpenseAsync(oneTimeExpenseForm.Amount, oneTimeExpenseForm.Year, oneTimeExpenseForm.Month, oneTimeExpenseForm.Category, oneTimeExpenseForm.Subcategory, oneTimeExpenseForm.Description);
+        oneTimeExpenseForm = new OneTimeExpenseFormModel();
+        ResetExpenseForms();
+        statusMessage = Localizer["expenses.expenseAdded"];
+    }
+
+    private async Task HandleAddSubscriptionAsync()
+    {
+        await AppState.AddSubscriptionAsync(subscriptionForm.Name, subscriptionForm.Amount, subscriptionForm.IntervalMonths, subscriptionForm.StartYear, subscriptionForm.StartMonth, subscriptionForm.EndYear, subscriptionForm.EndMonth, subscriptionForm.Category, subscriptionForm.Subcategory);
+        subscriptionForm = new SubscriptionExpenseFormModel();
+        ResetExpenseForms();
+        statusMessage = Localizer["expenses.subscriptionAdded"];
+    }
+
+    private async Task HandleGenerateExpensesAsync()
+    {
+        var generatedCount = await AppState.GenerateMissingSubscriptionExpensesAsync();
+        statusMessage = string.Format(Localizer["expenses.generatedMessage"], generatedCount);
+    }
+
+    private async Task HandleDeleteExpenseAsync(ExpenseEntry expense)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["expenses.deleteExpenseMessage"], expense.Description) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveExpenseAsync(expense.Id);
+        statusMessage = Localizer["expenses.expenseDeleted"];
+    }
+
+    private async Task HandleDeleteSubscriptionAsync(SubscriptionExpenseDefinition subscription)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["expenses.deleteSubscriptionMessage"], subscription.Name) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveSubscriptionAsync(subscription.Id);
+        statusMessage = Localizer["expenses.subscriptionDeleted"];
+    }
+
+    private void ResetExpenseForms()
+    {
+        var year = DateTime.Today.Year;
+        var month = DateTime.Today.Month;
+
+        oneTimeExpenseForm.Year = year;
+        oneTimeExpenseForm.Month = month;
+        subscriptionForm.StartYear = year;
+        subscriptionForm.StartMonth = month;
+        subscriptionForm.IntervalMonths = 12;
+
+        oneTimeExpenseEditContext = new EditContext(oneTimeExpenseForm);
+        subscriptionEditContext = new EditContext(subscriptionForm);
+    }
+
+    private string GetMonthYearLabel(int year, int month) => $"{Localizer[$"month.{month}"]} {year}";
+
+    private string GetCategoryDisplay(ExpenseCategory category, string? subcategory)
+    {
+        var categoryLabel = Localizer[$"expenseCategory.{category}"];
+        return string.IsNullOrWhiteSpace(subcategory) ? categoryLabel : $"{categoryLabel}/{subcategory.Trim()}";
+    }
+
+    private IReadOnlyList<string> GetSubcategorySuggestions(ExpenseCategory category) =>
+        AppState.Data.ExpenseRecords
+            .Where(record => record.Category == category && !string.IsNullOrWhiteSpace(record.Subcategory))
+            .Select(record => record.Subcategory.Trim())
+            .Concat(AppState.Data.Subscriptions
+                .Where(record => record.Category == category && !string.IsNullOrWhiteSpace(record.Subcategory))
+                .Select(record => record.Subcategory.Trim()))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value)
+            .ToList();
+
+    private string GetEndLabel(SubscriptionExpenseDefinition subscription) =>
+        subscription.EndYear.HasValue && subscription.EndMonth.HasValue
+            ? GetMonthYearLabel(subscription.EndYear.Value, subscription.EndMonth.Value)
+            : Localizer["common.openEnded"];
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AppState.Changed -= HandleChanged;
+        Localizer.Changed -= HandleChanged;
+    }
+
+    private sealed class OneTimeExpenseFormModel
+    {
+        [Required(ErrorMessage = "Description is required.")]
+        [StringLength(100, ErrorMessage = "Description must be 100 characters or fewer.")]
+        public string Description { get; set; } = string.Empty;
+
+        [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Amount must be greater than zero.")]
+        public decimal Amount { get; set; }
+
+        [Range(2000, 2100, ErrorMessage = "Year must be between 2000 and 2100.")]
+        public int Year { get; set; }
+
+        [Range(1, 12, ErrorMessage = "Month must be between 1 and 12.")]
+        public int Month { get; set; }
+
+        public ExpenseCategory Category { get; set; } = ExpenseCategory.Other;
+
+        [StringLength(60, ErrorMessage = "Subcategory must be 60 characters or fewer.")]
+        public string Subcategory { get; set; } = string.Empty;
+    }
+
+    private sealed class SubscriptionExpenseFormModel : IValidatableObject
+    {
+        [Required(ErrorMessage = "Name is required.")]
+        [StringLength(100, ErrorMessage = "Name must be 100 characters or fewer.")]
+        public string Name { get; set; } = string.Empty;
+
+        [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Amount must be greater than zero.")]
+        public decimal Amount { get; set; }
+
+        [Range(1, 120, ErrorMessage = "Interval must be between 1 and 120 months.")]
+        public int IntervalMonths { get; set; }
+
+        [Range(2000, 2100, ErrorMessage = "Start year must be between 2000 and 2100.")]
+        public int StartYear { get; set; }
+
+        [Range(1, 12, ErrorMessage = "Start month must be between 1 and 12.")]
+        public int StartMonth { get; set; }
+
+        public int? EndYear { get; set; }
+
+        public int? EndMonth { get; set; }
+
+        public ExpenseCategory Category { get; set; } = ExpenseCategory.Other;
+
+        [StringLength(60, ErrorMessage = "Subcategory must be 60 characters or fewer.")]
+        public string Subcategory { get; set; } = string.Empty;
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (EndYear.HasValue ^ EndMonth.HasValue)
+            {
+                yield return new ValidationResult("End year and end month must both be provided together.", [nameof(EndYear), nameof(EndMonth)]);
+            }
+
+            if (EndYear.HasValue && EndMonth.HasValue &&
+                new DateOnly(EndYear.Value, EndMonth.Value, 1) < new DateOnly(StartYear, StartMonth, 1))
+            {
+                yield return new ValidationResult("End period must be the same as or later than the start period.", [nameof(EndYear), nameof(EndMonth)]);
+            }
+        }
+    }
+}

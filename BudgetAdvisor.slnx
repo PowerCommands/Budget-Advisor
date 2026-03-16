@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BudgetAdvisor.App/BudgetAdvisor.App.csproj" />
+    <Project Path="src/BudgetAdvisor.Domain/BudgetAdvisor.Domain.csproj" />
+    <Project Path="src/BudgetAdvisor.Services/BudgetAdvisor.Services.csproj" />
+  </Folder>
+</Solution>

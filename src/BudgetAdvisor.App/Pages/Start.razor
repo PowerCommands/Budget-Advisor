@@ -1,0 +1,139 @@
+@page "/"
+@implements IDisposable
+@inject ApplicationState AppState
+@inject LocalizationService Localizer
+
+<PageTitle>Budget Advisor - @Localizer["nav.start"]</PageTitle>
+
+<section class="card-panel">
+    <div class="section-title-row">
+        <h2>@Localizer["start.latestMonth"]</h2>
+        <span class="section-note">@GetMonthLabel(overview.Year, overview.Month)</span>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card stat-card-income"><span>@Localizer["reporting.income"]</span><strong>@AppState.FormatCurrency(overview.Income)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.housing"]</span><strong>@AppState.FormatCurrency(overview.Housing)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.food"]</span><strong>@AppState.FormatCurrency(overview.Food)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.transport"]</span><strong>@AppState.FormatCurrency(overview.Transport)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.clothing"]</span><strong>@AppState.FormatCurrency(overview.Clothing)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.savings"]</span><strong>@AppState.FormatCurrency(overview.Savings)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.other"]</span><strong>@AppState.FormatCurrency(overview.Other)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.credits"]</span><strong>@AppState.FormatCurrency(overview.Credits)</strong></div>
+        <div class="@GetBalanceCardClass()">
+            <span>@Localizer["reporting.balanceStatus"]</span>
+            <strong>@GetBalanceStatusText()</strong>
+            <small>@AppState.FormatCurrency(overview.NetChange)</small>
+        </div>
+    </div>
+</section>
+
+<section class="card-panel mt-4">
+    <div class="section-title-row">
+        <h2>@Localizer["start.monthlyReport"]</h2>
+        <div class="report-filter-row">
+            <MudDatePicker Label="@Localizer["field.start"]"
+                           Date="@reportStartDate"
+                           DateChanged="HandleStartDateChanged"
+                           Variant="Variant.Outlined"
+                           PickerVariant="PickerVariant.Dialog" />
+            <MudDatePicker Label="@Localizer["field.end"]"
+                           Date="@reportEndDate"
+                           DateChanged="HandleEndDateChanged"
+                           Variant="Variant.Outlined"
+                           PickerVariant="PickerVariant.Dialog" />
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table app-table">
+            <thead>
+                <tr>
+                    <th>@Localizer["table.year"]</th>
+                    <th>@Localizer["table.month"]</th>
+                    <th>@Localizer["reporting.income"]</th>
+                    <th>@Localizer["table.expenses"]</th>
+                    <th>@Localizer["table.change"]</th>
+                    <th>@Localizer["table.balance"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in reportRows)
+                {
+                    <tr>
+                        <td>@row.Year</td>
+                        <td>@GetMonthName(row.Month)</td>
+                        <td>@AppState.FormatCurrency(row.Income)</td>
+                        <td>@AppState.FormatCurrency(row.Expenses)</td>
+                        <td>@AppState.FormatCurrency(row.Change)</td>
+                        <td>@AppState.FormatCurrency(row.Balance)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    private MonthlyOverview overview = new();
+    private IReadOnlyList<MonthlyReportRow> reportRows = [];
+    private DateTime? reportStartDate;
+    private DateTime? reportEndDate;
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += Reload;
+        Localizer.Changed += Reload;
+        var currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        reportStartDate = currentMonth.AddMonths(-11);
+        reportEndDate = DateTime.Today;
+        LoadData();
+    }
+
+    private void LoadData()
+    {
+        overview = AppState.GetMonthlyOverview(DateTime.Today.Year, DateTime.Today.Month);
+
+        var start = reportStartDate ?? DateTime.Today;
+        var end = reportEndDate ?? DateTime.Today;
+        reportRows = AppState.GetMonthlyReportRows(DateOnly.FromDateTime(start), DateOnly.FromDateTime(end));
+    }
+
+    private void Reload()
+    {
+        LoadData();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private string GetMonthLabel(int year, int month) => $"{GetMonthName(month)} {year}";
+
+    private string GetMonthName(int month) => Localizer[$"month.{month}"];
+
+    private Task HandleStartDateChanged(DateTime? value)
+    {
+        reportStartDate = value ?? reportStartDate;
+        LoadData();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task HandleEndDateChanged(DateTime? value)
+    {
+        reportEndDate = value ?? reportEndDate;
+        LoadData();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private bool IsBalanced() => overview.NetChange == 0m;
+
+    private string GetBalanceStatusText() => IsBalanced() ? "OK" : "NOK";
+
+    private string GetBalanceCardClass() => IsBalanced()
+        ? "stat-card stat-card-balance-ok"
+        : "stat-card stat-card-balance-nok";
+
+    public void Dispose()
+    {
+        AppState.Changed -= Reload;
+        Localizer.Changed -= Reload;
+    }
+}

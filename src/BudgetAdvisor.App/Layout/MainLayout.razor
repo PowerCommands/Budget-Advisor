@@ -1,0 +1,237 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject ApplicationState AppState
+@inject LocalizationService Localizer
+@inject NavigationManager NavigationManager
+
+<MudThemeProvider Theme="@GetAppTheme()" IsDarkMode="@IsDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="page-shell">
+    <main class="main-panel">
+        <header class="top-bar">
+            <div class="brand-header">
+                <img class="brand-icon" src="favicon.svg" alt="Budget Advisor" />
+                <div>
+                    <div class="app-title-row">
+                        <div class="app-title">@Localizer["app.title"]</div>
+                        <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">v1.0</MudChip>
+                    </div>
+                    <div class="eyebrow">Budget Advisor - @GetCurrentSectionTitle()</div>
+                </div>
+            </div>
+            <div class="top-bar-language">
+                <div class="language-flags" role="group" aria-label="@Localizer["settings.language"]">
+                    @foreach (var language in Localizer.Languages)
+                    {
+                        var isCurrentLanguage = string.Equals(language, Localizer.CurrentLanguage, StringComparison.OrdinalIgnoreCase);
+                        <MudButton Class="@GetLanguageButtonClass(isCurrentLanguage)"
+                                   Variant="@(isCurrentLanguage ? Variant.Filled : Variant.Outlined)"
+                                   Color="Color.Default"
+                                   OnClick="@(() => HandleLanguageChangedAsync(language))">
+                            <img class="language-flag" src="@($"localization/{language}.png")" alt="@Localizer[$"language.{language}"]" />
+                        </MudButton>
+                    }
+                </div>
+                <div class="top-bar-meta">
+                    <MudChip T="string" Color="Color.Primary" Variant="Variant.Text">@Localizer.CurrentLanguage.ToUpperInvariant()</MudChip>
+                    <MudChip T="string" Color="Color.Secondary" Variant="Variant.Text">@AppState.Data.CurrencyCode</MudChip>
+                </div>
+            </div>
+        </header>
+
+        <nav class="tab-bar">
+            <MudTabs Class="nav-tabs-shell"
+                     ActivePanelIndex="@GetCurrentTabIndex()"
+                     ActivePanelIndexChanged="HandleTabChangedAsync"
+                     Rounded="true"
+                     SliderColor="Color.Primary"
+                     Elevation="0">
+                <MudTabPanel Text="@Localizer["nav.start"]" Icon="@Icons.Material.Filled.SpaceDashboard" />
+                <MudTabPanel Text="@Localizer["nav.household"]" Icon="@Icons.Material.Filled.Groups" />
+                <MudTabPanel Text="@Localizer["nav.housingTab"]" Icon="@Icons.Material.Filled.HomeWork" />
+                <MudTabPanel Text="@Localizer["nav.expenses"]" Icon="@Icons.Material.Filled.ReceiptLong" />
+                <MudTabPanel Text="@Localizer["nav.debts"]" Icon="@Icons.Material.Filled.CreditCard" />
+                <MudTabPanel Text="@Localizer["nav.savings"]" Icon="@Icons.Material.Filled.Savings" />
+                <MudTabPanel Text="@Localizer["nav.assets"]" Icon="@Icons.Material.Filled.AccountBalanceWallet" />
+                <MudTabPanel Text="@Localizer["nav.settings"]" Icon="@Icons.Material.Filled.Settings" />
+            </MudTabs>
+        </nav>
+
+        <article class="page-content">
+            @Body
+        </article>
+    </main>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Localizer.Changed += HandleChanged;
+        AppState.Changed += HandleChanged;
+        NavigationManager.LocationChanged += HandleLocationChanged;
+    }
+
+    private async Task HandleLanguageChangedAsync(string languageCode)
+    {
+        await Localizer.SetLanguageAsync(languageCode);
+    }
+
+    private bool IsDarkMode => string.Equals(AppState.Data.ThemeMode, "Dark", StringComparison.OrdinalIgnoreCase);
+
+    private MudTheme GetAppTheme()
+    {
+        var themeMode = AppState.Data.ThemeMode;
+
+        return themeMode switch
+        {
+            "Secondary" => CreateTheme("#7c4dff", "#03dac6", "#f7f5ff", "#ffffff", "#1f1b2d", "#6a6480"),
+            "Tertiary" => CreateTheme("#ff6f00", "#00acc1", "#fff8f1", "#ffffff", "#2b2118", "#756657"),
+            "Dark" => CreateDarkTheme(),
+            _ => CreateTheme("#594ae2", "#ff4081", "#f6f7fb", "#ffffff", "#1d2233", "#6b7285")
+        };
+    }
+
+    private static MudTheme CreateTheme(
+        string primary,
+        string secondary,
+        string background,
+        string surface,
+        string textPrimary,
+        string textSecondary) => new()
+        {
+            PaletteLight = new PaletteLight
+            {
+                Primary = primary,
+                Secondary = secondary,
+                Tertiary = "#8bc34a",
+                Background = background,
+                Surface = surface,
+                DrawerBackground = surface,
+                AppbarBackground = surface,
+                TextPrimary = textPrimary,
+                TextSecondary = textSecondary
+            },
+            PaletteDark = CreateDarkTheme().PaletteDark,
+            Typography = new Typography
+            {
+                Default = new DefaultTypography
+                {
+                    FontFamily = ["Roboto", "Helvetica", "Arial", "sans-serif"]
+                }
+            }
+        };
+
+    private static MudTheme CreateDarkTheme() => new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#594ae2",
+            Secondary = "#ff4081",
+            Tertiary = "#8cbf26",
+            Background = "#f6f7fb",
+            Surface = "#ffffff",
+            DrawerBackground = "#ffffff",
+            AppbarBackground = "#ffffff",
+            TextPrimary = "#1d2233",
+            TextSecondary = "#6b7285"
+        },
+        PaletteDark = new PaletteDark
+        {
+            Primary = "#8b80ff",
+            Secondary = "#ff79b0",
+            Tertiary = "#b6e36d",
+            Background = "#12151c",
+            Surface = "#1b2030",
+            DrawerBackground = "#1b2030",
+            AppbarBackground = "#1b2030",
+            TextPrimary = "#f3f5fa",
+            TextSecondary = "#aeb7cc"
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = ["Roboto", "Helvetica", "Arial", "sans-serif"]
+            }
+        }
+    };
+
+    private static string GetLanguageButtonClass(bool isSelected) =>
+        isSelected ? "language-flag-button selected" : "language-flag-button";
+
+    private string GetCurrentSectionTitle()
+    {
+        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', '#')[0].Trim('/');
+
+        return relativePath.ToLowerInvariant() switch
+        {
+            "" => Localizer["nav.start"],
+            "household" => Localizer["nav.household"],
+            "housing" => Localizer["nav.housingTab"],
+            "expenses" => Localizer["nav.expenses"],
+            "debts" => Localizer["nav.debts"],
+            "savings" => Localizer["nav.savings"],
+            "assets" => Localizer["nav.assets"],
+            "tools" => Localizer["nav.settings"],
+            "settings" => Localizer["nav.settings"],
+            _ => Localizer["common.notFound"]
+        };
+    }
+
+    private void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
+        InvokeAsync(StateHasChanged);
+
+    private int GetCurrentTabIndex()
+    {
+        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', '#')[0].Trim('/');
+
+        return relativePath.ToLowerInvariant() switch
+        {
+            "" => 0,
+            "household" => 1,
+            "housing" => 2,
+            "expenses" => 3,
+            "debts" => 4,
+            "savings" => 5,
+            "assets" => 6,
+            "tools" or "settings" => 7,
+            _ => 0
+        };
+    }
+
+    private Task HandleTabChangedAsync(int tabIndex)
+    {
+        var targetUri = tabIndex switch
+        {
+            0 => "",
+            1 => "household",
+            2 => "housing",
+            3 => "expenses",
+            4 => "debts",
+            5 => "savings",
+            6 => "assets",
+            7 => "settings",
+            _ => ""
+        };
+
+        var currentUri = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', '#')[0].Trim('/');
+        if (!string.Equals(currentUri, targetUri, StringComparison.OrdinalIgnoreCase))
+        {
+            NavigationManager.NavigateTo(targetUri);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Localizer.Changed -= HandleChanged;
+        AppState.Changed -= HandleChanged;
+        NavigationManager.LocationChanged -= HandleLocationChanged;
+    }
+}

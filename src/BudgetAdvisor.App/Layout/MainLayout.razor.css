@@ -1,0 +1,133 @@
+.page-shell {
+    min-height: 100vh;
+    background: var(--mud-palette-background);
+}
+
+.main-panel {
+    min-height: 100vh;
+    width: 96%;
+    max-width: none;
+    margin: 0 auto;
+}
+
+.top-bar {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: center;
+    padding: 1.5rem 1.75rem 0;
+}
+
+.brand-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.brand-icon {
+    width: 3.25rem;
+    height: 3.25rem;
+    flex: 0 0 auto;
+}
+
+.app-title-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.eyebrow {
+    color: var(--mud-palette-text-secondary);
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.app-title {
+    font-size: 1.6rem;
+    font-weight: 700;
+}
+
+.top-bar-language {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.6rem;
+}
+
+.language-flags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    justify-content: flex-end;
+}
+
+.language-flag-button {
+    min-width: 0;
+    padding: 0.3rem 0.45rem;
+    border-radius: 999px;
+}
+
+.language-flag-button.selected {
+    background: rgba(20, 76, 58, 0.12);
+}
+
+.language-flag {
+    display: block;
+    width: 1.6rem;
+    height: 1.1rem;
+    object-fit: cover;
+    border-radius: 0.2rem;
+}
+
+.top-bar-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+.tab-bar {
+    padding: 1rem 1.75rem 0;
+}
+
+.nav-tabs-shell {
+    background: transparent;
+}
+
+.nav-tabs-shell ::deep .mud-tabs-panels {
+    display: none;
+}
+
+.nav-tabs-shell ::deep .mud-tab {
+    min-height: 48px;
+    text-transform: none;
+    font-weight: 600;
+}
+
+.nav-tabs-shell ::deep .mud-tabs-tabbar {
+    background: transparent;
+}
+
+.page-content {
+    padding: 1.5rem 1.75rem 2rem;
+}
+
+@media (max-width: 699px) {
+    .top-bar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .top-bar-language,
+    .language-flags,
+    .top-bar-meta {
+        align-items: flex-start;
+        justify-content: flex-start;
+    }
+
+    .tab-bar {
+        padding-top: 0.75rem;
+    }
+}
