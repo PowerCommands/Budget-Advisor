@@ -1,9 +1,505 @@
 @page "/savings"
+@implements IDisposable
+@inject ApplicationState AppState
+@inject IDialogService DialogService
 @inject LocalizationService Localizer
 
 <PageTitle>Budget Advisor - @Localizer["nav.savings"]</PageTitle>
 
-<section class="placeholder-panel">
-    <h1>@Localizer["nav.savings"]</h1>
-    <p>@Localizer["placeholder.futureTab"]</p>
-</section>
+@if (!string.IsNullOrWhiteSpace(statusMessage))
+{
+    <div class="status-banner">@statusMessage</div>
+}
+
+<MudTabs Class="section-tabs" Rounded="true" SliderColor="Color.Primary" Elevation="0">
+    <MudTabPanel Text="@Localizer["savings.depositsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
+        <ExpenseRecordsTable Scope="ExpenseQueryScope.Savings"
+                             TitleKey="savings.depositsTab"
+                             OnDelete="HandleDeleteSavingsExpenseAsync" />
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["savings.returnsTab"]" Icon="@Icons.Material.Filled.TrendingUp">
+        <section class="card-panel">
+            <div class="section-title-row">
+                <h2>@Localizer["savings.returnsTab"]</h2>
+            </div>
+
+            <div class="form-grid mb-3">
+                <div>
+                    <label class="form-label">@Localizer["filter.name"]</label>
+                    <InputText class="form-control" @bind-Value="returnsNameFilter" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.category"]</label>
+                    <InputSelect class="form-select" @bind-Value="returnsTypeFilter">
+                        <option value="">@Localizer["filter.allCategories"]</option>
+                        <option value="Bank">@Localizer["savings.bankTab"]</option>
+                        <option value="Fund">@Localizer["savings.fundsTab"]</option>
+                        <option value="Stock">@Localizer["savings.stocksTab"]</option>
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["filter.startDate"]</label>
+                    <InputDate class="form-control" @bind-Value="returnsStartDate" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["filter.endDate"]</label>
+                    <InputDate class="form-control" @bind-Value="returnsEndDate" />
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["field.name"]</th>
+                            <th>@Localizer["field.category"]</th>
+                            <th>@Localizer["table.period"]</th>
+                            <th>@Localizer["field.amount"]</th>
+                            <th>@Localizer["field.actions"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!FilteredWithdrawalEntries.Any())
+                        {
+                            <tr>
+                                <td colspan="5" class="empty-state">@Localizer["table.noCostRows"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var entry in FilteredWithdrawalEntries)
+                            {
+                                <tr>
+                                    <td>@GetIncomeDisplay(entry)</td>
+                                    <td>@entry.Type</td>
+                                    <td>@($"{entry.Year:0000}/{entry.Month:00}")</td>
+                                    <td>@AppState.FormatCurrency(entry.Amount)</td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => HandleDeleteSavingsIncomeAsync(entry))" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["savings.bankTab"]" Icon="@Icons.Material.Filled.AccountBalance">
+        @RenderSavingsAccountTab(SavingsAccountType.Bank)
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["savings.fundsTab"]" Icon="@Icons.Material.Filled.ShowChart">
+        @RenderSavingsAccountTab(SavingsAccountType.Fund)
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["savings.stocksTab"]" Icon="@Icons.Material.Filled.CandlestickChart">
+        @RenderSavingsAccountTab(SavingsAccountType.Stock)
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private string? statusMessage;
+    private string returnsNameFilter = string.Empty;
+    private string returnsTypeFilter = string.Empty;
+    private DateTime? returnsStartDate;
+    private DateTime? returnsEndDate;
+
+    private IEnumerable<IncomeEntry> SavingsWithdrawalEntries =>
+        AppState.Data.IncomeRecords
+            .Where(entry => entry.SavingsAccountId.HasValue)
+            .OrderByDescending(entry => entry.Year)
+            .ThenByDescending(entry => entry.Month)
+            .ThenBy(entry => entry.Type)
+            .ThenBy(entry => entry.Metadata);
+
+    private IReadOnlyList<IncomeEntry> FilteredWithdrawalEntries =>
+        SavingsWithdrawalEntries
+            .Where(entry =>
+                string.IsNullOrWhiteSpace(returnsNameFilter) ||
+                GetIncomeDisplay(entry).Contains(returnsNameFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(entry =>
+                string.IsNullOrWhiteSpace(returnsTypeFilter) ||
+                string.Equals(entry.Type, returnsTypeFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(entry =>
+                !returnsStartDate.HasValue ||
+                new DateOnly(entry.Year, entry.Month, 1) >= new DateOnly(returnsStartDate.Value.Year, returnsStartDate.Value.Month, 1))
+            .Where(entry =>
+                !returnsEndDate.HasValue ||
+                new DateOnly(entry.Year, entry.Month, 1) <= new DateOnly(returnsEndDate.Value.Year, returnsEndDate.Value.Month, 1))
+            .ToList();
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += HandleChanged;
+        Localizer.Changed += HandleChanged;
+    }
+
+    private RenderFragment RenderSavingsAccountTab(SavingsAccountType accountType) => @<div>
+        <div class="d-flex justify-content-end mb-3">
+            <button class="btn btn-outline-primary" @onclick="() => HandleCreateAccountAsync(accountType)">@Localizer[GetCreateAccountTitleKey(accountType)]</button>
+        </div>
+
+        @if (!GetAccounts(accountType).Any())
+        {
+            <section class="card-panel">
+                <p class="empty-state mb-0">@Localizer["savings.noAccounts"]</p>
+            </section>
+        }
+        else
+        {
+            @foreach (var account in GetAccounts(accountType))
+            {
+                <section class="card-panel mt-4">
+                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                        <div>
+                            <h2>@account.AccountName</h2>
+                            <div class="form-grid">
+                                @if (accountType == SavingsAccountType.Bank)
+                                {
+                                    <div>
+                                        <label class="form-label">@Localizer["savings.bankName"]</label>
+                                        <div>@account.ProviderName</div>
+                                    </div>
+                                }
+                                <div>
+                                    <label class="form-label">@Localizer["savings.openingBalance"]</label>
+                                    <div>@AppState.FormatCurrency(account.OpeningBalance)</div>
+                                </div>
+                                <div>
+                                    <label class="form-label">@Localizer["table.balance"]</label>
+                                    <div>@AppState.FormatCurrency(account.CurrentBalance)</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="button-row">
+                            <button class="btn btn-outline-primary" @onclick="() => HandleDepositAsync(account)">@Localizer["savings.deposit"]</button>
+                            <button class="btn btn-outline-primary" @onclick="() => HandleWithdrawalAsync(account)">@Localizer["savings.withdrawal"]</button>
+                            <button class="btn btn-outline-primary" @onclick="() => HandleAddPeriodAsync(account)">@Localizer["savings.addPeriod"]</button>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Color="Color.Error"
+                                           Size="Size.Small"
+                                           OnClick="@(() => HandleDeleteAccountAsync(account))" />
+                        </div>
+                    </div>
+
+                    <section class="card-panel mt-4">
+                        <h3>@Localizer["savings.periods"]</h3>
+                        <div class="table-responsive">
+                            <table class="table app-table">
+                                <thead>
+                                    <tr>
+                                        <th>@Localizer["field.start"]</th>
+                                        <th>@Localizer["field.end"]</th>
+                                        <th>@Localizer[accountType == SavingsAccountType.Bank ? "savings.interestRate" : "savings.estimatedReturn"]</th>
+                                        @if (accountType == SavingsAccountType.Bank)
+                                        {
+                                            <th>@Localizer["savings.taxPercent"]</th>
+                                        }
+                                        <th>@Localizer["field.actions"]</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (!GetPeriods(account.Id).Any())
+                                    {
+                                        <tr>
+                                            <td colspan="@(accountType == SavingsAccountType.Bank ? 5 : 4)" class="empty-state">@Localizer["savings.noPeriods"]</td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var period in GetPeriods(account.Id))
+                                        {
+                                            <tr>
+                                                <td>@period.StartDate.ToString("yyyy-MM-dd")</td>
+                                                <td>@period.EndDate.ToString("yyyy-MM-dd")</td>
+                                                <td>@($"{period.RatePercent:0.##}%")</td>
+                                                @if (accountType == SavingsAccountType.Bank)
+                                                {
+                                                    <td>@($"{period.TaxPercent:0.##}%")</td>
+                                                }
+                                                <td>
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                                   Color="Color.Error"
+                                                                   Size="Size.Small"
+                                                                   OnClick="@(() => HandleDeletePeriodAsync(period))" />
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </section>
+            }
+        }
+    </div>;
+
+    private IReadOnlyList<SavingsAccount> GetAccounts(SavingsAccountType accountType) =>
+        AppState.Data.SavingsAccounts
+            .Where(account => account.AccountType == accountType)
+            .OrderBy(account => account.AccountName)
+            .ThenBy(account => account.ProviderName)
+            .ToList();
+
+    private IReadOnlyList<SavingsReturnPeriod> GetPeriods(Guid accountId) =>
+        AppState.Data.SavingsReturnPeriods
+            .Where(period => period.SavingsAccountId == accountId)
+            .OrderBy(period => period.StartDate)
+            .ThenBy(period => period.EndDate)
+            .ToList();
+
+    private string GetIncomeDisplay(IncomeEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.Metadata)
+            ? AppState.GetIncomeTypeDisplay(entry.Type)
+            : $"{entry.Metadata} - {AppState.GetIncomeTypeDisplay(entry.Type)}";
+
+    private string GetCreateAccountTitleKey(SavingsAccountType accountType) => accountType switch
+    {
+        SavingsAccountType.Bank => "savings.createBankAccount",
+        SavingsAccountType.Fund => "savings.createFundAccount",
+        _ => "savings.createStockAccount"
+    };
+
+    private async Task HandleCreateAccountAsync(SavingsAccountType accountType)
+    {
+        var parameters = new DialogParameters<CreateSavingsAccountDialog>
+        {
+            { dialog => dialog.AccountType, accountType }
+        };
+
+        var dialog = await DialogService.ShowAsync<CreateSavingsAccountDialog>(Localizer[GetCreateAccountTitleKey(accountType)], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not CreateSavingsAccountDialog.CreateSavingsAccountDialogModel model)
+        {
+            return;
+        }
+
+        await AppState.AddSavingsAccountAsync(accountType, model.ProviderName, model.AccountName, model.OpeningBalance);
+        statusMessage = Localizer["savings.accountCreated"];
+    }
+
+    private async Task HandleAddPeriodAsync(SavingsAccount account)
+    {
+        var parameters = new DialogParameters<AddSavingsReturnPeriodDialog>
+        {
+            { dialog => dialog.AccountType, account.AccountType }
+        };
+
+        var dialog = await DialogService.ShowAsync<AddSavingsReturnPeriodDialog>(Localizer["savings.addPeriod"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not AddSavingsReturnPeriodDialog.AddSavingsReturnPeriodDialogModel model || !model.StartDate.HasValue || !model.EndDate.HasValue)
+        {
+            return;
+        }
+
+        var startDate = DateOnly.FromDateTime(model.StartDate.Value);
+        var endDate = DateOnly.FromDateTime(model.EndDate.Value);
+        if (endDate < startDate)
+        {
+            statusMessage = Localizer["validation.endDateOnOrAfterStartDate"];
+            return;
+        }
+
+        try
+        {
+            await AppState.AddSavingsReturnPeriodAsync(account.Id, startDate, endDate, model.RatePercent, model.TaxPercent);
+            statusMessage = Localizer["savings.periodAdded"];
+        }
+        catch (InvalidOperationException)
+        {
+            statusMessage = Localizer["validation.savingsPeriodOverlap"];
+        }
+    }
+
+    private async Task HandleDepositAsync(SavingsAccount account)
+    {
+        var dialog = await DialogService.ShowAsync<RegisterSavingsDepositDialog>(Localizer["savings.deposit"]);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not SavingsAmountDialogModel model || !model.Date.HasValue)
+        {
+            return;
+        }
+
+        await AppState.AddSavingsDepositAsync(account.Id, DateOnly.FromDateTime(model.Date.Value), model.Amount);
+        statusMessage = Localizer["savings.depositRegistered"];
+    }
+
+    private async Task HandleWithdrawalAsync(SavingsAccount account)
+    {
+        var dialog = await DialogService.ShowAsync<RegisterSavingsWithdrawalDialog>(Localizer["savings.withdrawal"]);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not SavingsAmountDialogModel model || !model.Date.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            await AppState.AddSavingsWithdrawalAsync(account.Id, DateOnly.FromDateTime(model.Date.Value), model.Amount);
+            statusMessage = Localizer["savings.withdrawalRegistered"];
+        }
+        catch (InvalidOperationException)
+        {
+            statusMessage = Localizer["validation.savingsWithdrawalExceedsBalance"];
+        }
+    }
+
+    private async Task HandleDeleteAccountAsync(SavingsAccount account)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["savings.deleteAccountMessage"], account.AccountName) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveSavingsAccountAsync(account.Id);
+        statusMessage = Localizer["savings.accountDeleted"];
+    }
+
+    private async Task HandleDeletePeriodAsync(SavingsReturnPeriod period)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["savings.deletePeriodMessage"], period.StartDate.ToString("yyyy-MM-dd"), period.EndDate.ToString("yyyy-MM-dd")) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveSavingsReturnPeriodAsync(period.Id);
+        statusMessage = Localizer["savings.periodDeleted"];
+    }
+
+    private async Task HandleDeleteSavingsExpenseAsync(ExpenseEntry expense)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["savings.deleteCostMessage"], AppState.GetExpenseSubcategoryDisplay(expense)) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveExpenseAsync(expense.Id);
+        statusMessage = Localizer["savings.costDeleted"];
+    }
+
+    private async Task HandleDeleteSavingsIncomeAsync(IncomeEntry income)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["savings.deleteReturnMessage"], GetIncomeDisplay(income)) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveIncomeAsync(income.Id, removeSeries: false);
+        statusMessage = Localizer["savings.returnDeleted"];
+    }
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AppState.Changed -= HandleChanged;
+        Localizer.Changed -= HandleChanged;
+    }
+}

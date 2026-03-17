@@ -7,13 +7,6 @@
 
 <PageTitle>Budget Advisor - @Localizer["nav.household"]</PageTitle>
 
-<div class="page-header">
-    <div>
-        <h1>@Localizer["household.title"]</h1>
-        <p>@Localizer["household.subtitle"]</p>
-    </div>
-</div>
-
 <div class="stack-grid">
     <section class="card-panel">
         <h2>@Localizer["household.addMember"]</h2>
@@ -73,23 +66,20 @@
                     <ValidationMessage For="() => oneTimeIncomeForm.Amount" />
                 </div>
                 <div>
-                    <label class="form-label">@Localizer["field.year"]</label>
-                    <InputNumber class="form-control" @bind-Value="oneTimeIncomeForm.Year" />
-                    <ValidationMessage For="() => oneTimeIncomeForm.Year" />
+                    <label class="form-label">@Localizer["field.date"]</label>
+                    <InputDate class="form-control" @bind-Value="oneTimeIncomeForm.Date" />
+                    <ValidationMessage For="() => oneTimeIncomeForm.Date" />
                 </div>
                 <div>
-                    <label class="form-label">@Localizer["field.month"]</label>
-                    <InputNumber class="form-control" @bind-Value="oneTimeIncomeForm.Month" />
-                    <ValidationMessage For="() => oneTimeIncomeForm.Month" />
-                </div>
-                <div>
-                    <label class="form-label">@Localizer["field.type"]</label>
-                    <InputSelect class="form-select" @bind-Value="oneTimeIncomeForm.Type">
-                        @foreach (var incomeType in Enum.GetValues<IncomeType>())
+                    <label class="form-label">@Localizer["field.subcategory"]</label>
+                    <InputText class="form-control" @bind-Value="oneTimeIncomeForm.Type" list="one-time-income-types" />
+                    <datalist id="one-time-income-types">
+                        @foreach (var incomeType in GetIncomeTypeSuggestions())
                         {
-                            <option value="@incomeType">@Localizer[$"incomeType.{incomeType}"]</option>
+                            <option value="@incomeType"></option>
                         }
-                    </InputSelect>
+                    </datalist>
+                    <ValidationMessage For="() => oneTimeIncomeForm.Type" />
                 </div>
             </div>
             <button class="btn btn-primary" disabled="@(!HasMembers)" type="submit">@Localizer["action.addIncome"]</button>
@@ -119,24 +109,14 @@
                     <ValidationMessage For="() => monthlySalaryForm.Amount" />
                 </div>
                 <div>
-                    <label class="form-label">@Localizer["field.startYear"]</label>
-                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.StartYear" />
-                    <ValidationMessage For="() => monthlySalaryForm.StartYear" />
+                    <label class="form-label">@Localizer["field.start"]</label>
+                    <InputDate class="form-control" @bind-Value="monthlySalaryForm.StartDate" />
+                    <ValidationMessage For="() => monthlySalaryForm.StartDate" />
                 </div>
                 <div>
-                    <label class="form-label">@Localizer["field.startMonth"]</label>
-                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.StartMonth" />
-                    <ValidationMessage For="() => monthlySalaryForm.StartMonth" />
-                </div>
-                <div>
-                    <label class="form-label">@Localizer["field.endYear"]</label>
-                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.EndYear" />
-                    <ValidationMessage For="() => monthlySalaryForm.EndYear" />
-                </div>
-                <div>
-                    <label class="form-label">@Localizer["field.endMonth"]</label>
-                    <InputNumber class="form-control" @bind-Value="monthlySalaryForm.EndMonth" />
-                    <ValidationMessage For="() => monthlySalaryForm.EndMonth" />
+                    <label class="form-label">@Localizer["field.end"]</label>
+                    <InputDate class="form-control" @bind-Value="monthlySalaryForm.EndDate" />
+                    <ValidationMessage For="() => monthlySalaryForm.EndDate" />
                 </div>
             </div>
             <button class="btn btn-primary" disabled="@(!HasMembers)" type="submit">@Localizer["action.generateSalary"]</button>
@@ -171,13 +151,15 @@
                     <ValidationMessage For="() => yearlyIncomeForm.Year" />
                 </div>
                 <div>
-                    <label class="form-label">@Localizer["field.type"]</label>
-                    <InputSelect class="form-select" @bind-Value="yearlyIncomeForm.Type">
-                        @foreach (var incomeType in Enum.GetValues<IncomeType>())
+                    <label class="form-label">@Localizer["field.subcategory"]</label>
+                    <InputText class="form-control" @bind-Value="yearlyIncomeForm.Type" list="yearly-income-types" />
+                    <datalist id="yearly-income-types">
+                        @foreach (var incomeType in GetIncomeTypeSuggestions())
                         {
-                            <option value="@incomeType">@Localizer[$"incomeType.{incomeType}"]</option>
+                            <option value="@incomeType"></option>
                         }
-                    </InputSelect>
+                    </datalist>
+                    <ValidationMessage For="() => yearlyIncomeForm.Type" />
                 </div>
             </div>
             <button class="btn btn-primary" disabled="@(!HasMembers)" type="submit">@Localizer["action.generateYearlyIncome"]</button>
@@ -186,16 +168,13 @@
 </div>
 
 <section class="card-panel mt-4">
-    <div class="section-title-row">
-        <h2>@Localizer["household.incomeEntries"]</h2>
-        <span class="section-note">@Localizer["household.incomeEntriesNote"]</span>
-    </div>
+    <h2>@Localizer["household.incomeEntries"]</h2>
     <div class="table-responsive">
         <table class="table app-table">
             <thead>
                 <tr>
                     <th>@Localizer["field.member"]</th>
-                    <th>@Localizer["field.type"]</th>
+                    <th>@Localizer["field.subcategory"]</th>
                     <th>@Localizer["field.year"]</th>
                     <th>@Localizer["field.month"]</th>
                     <th>@Localizer["field.amount"]</th>
@@ -206,8 +185,8 @@
                 @foreach (var income in AppState.Data.IncomeRecords.OrderByDescending(record => record.Year).ThenByDescending(record => record.Month))
                 {
                     <tr>
-                        <td>@GetMemberName(income.MemberId)</td>
-                        <td>@Localizer[$"incomeType.{income.Type}"]</td>
+                        <td>@GetIncomeOwnerLabel(income)</td>
+                        <td>@GetIncomeTypeDisplay(income)</td>
                         <td>@income.Year</td>
                         <td>@Localizer[$"month.{income.Month}"]</td>
                         <td>@AppState.FormatCurrency(income.Amount)</td>
@@ -250,14 +229,17 @@
 
     private async Task HandleAddOneTimeIncomeAsync()
     {
-        await AppState.AddOneTimeIncomeAsync(oneTimeIncomeForm.MemberId!.Value, oneTimeIncomeForm.Amount, oneTimeIncomeForm.Year, oneTimeIncomeForm.Month, oneTimeIncomeForm.Type);
+        var date = DateOnly.FromDateTime(oneTimeIncomeForm.Date!.Value);
+        await AppState.AddOneTimeIncomeAsync(oneTimeIncomeForm.MemberId!.Value, oneTimeIncomeForm.Amount, date.Year, date.Month, oneTimeIncomeForm.Type);
         oneTimeIncomeForm = new OneTimeIncomeFormModel();
         ResetIncomeForms();
     }
 
     private async Task HandleAddMonthlySalaryAsync()
     {
-        await AppState.AddMonthlySalaryAsync(monthlySalaryForm.MemberId!.Value, monthlySalaryForm.Amount, monthlySalaryForm.StartYear, monthlySalaryForm.StartMonth, monthlySalaryForm.EndYear, monthlySalaryForm.EndMonth);
+        var startDate = DateOnly.FromDateTime(monthlySalaryForm.StartDate!.Value);
+        var endDate = DateOnly.FromDateTime(monthlySalaryForm.EndDate!.Value);
+        await AppState.AddMonthlySalaryAsync(monthlySalaryForm.MemberId!.Value, monthlySalaryForm.Amount, startDate.Year, startDate.Month, endDate.Year, endDate.Month);
         monthlySalaryForm = new MonthlySalaryFormModel();
         ResetIncomeForms();
     }
@@ -324,16 +306,15 @@
 
     private void ResetIncomeForms()
     {
-        var year = DateTime.Today.Year;
-        var month = DateTime.Today.Month;
+        var today = DateTime.Today;
 
-        oneTimeIncomeForm.Year = year;
-        oneTimeIncomeForm.Month = month;
-        monthlySalaryForm.StartYear = year;
-        monthlySalaryForm.StartMonth = month;
-        monthlySalaryForm.EndYear = year;
-        monthlySalaryForm.EndMonth = month;
-        yearlyIncomeForm.Year = year;
+        oneTimeIncomeForm.Date = today;
+        oneTimeIncomeForm.Type = Localizer["incomeType.Salary"];
+        monthlySalaryForm.StartDate = today;
+        monthlySalaryForm.EndDate = today;
+        monthlySalaryForm.Type = Localizer["incomeType.Salary"];
+        yearlyIncomeForm.Year = today.Year;
+        yearlyIncomeForm.Type = Localizer["incomeType.Salary"];
 
         oneTimeIncomeEditContext = new EditContext(oneTimeIncomeForm);
         monthlySalaryEditContext = new EditContext(monthlySalaryForm);
@@ -342,6 +323,33 @@
 
     private string GetMemberName(Guid memberId) =>
         AppState.Data.Members.FirstOrDefault(member => member.Id == memberId)?.Name ?? Localizer["common.unknown"];
+
+    private string GetIncomeOwnerLabel(IncomeEntry income) =>
+        (income.SavingsAccountId.HasValue || income.AssetId.HasValue) && !string.IsNullOrWhiteSpace(income.Metadata)
+            ? income.Metadata
+            : GetMemberName(income.MemberId);
+
+    private string GetIncomeTypeDisplay(IncomeEntry income)
+    {
+        var typeLabel = AppState.GetIncomeTypeDisplay(income.Type);
+
+        return string.IsNullOrWhiteSpace(income.Metadata) ? typeLabel : $"{income.Metadata} - {typeLabel}";
+    }
+
+    private IReadOnlyList<string> GetIncomeTypeSuggestions() =>
+        AppState.Data.IncomeRecords
+            .Select(record => AppState.GetIncomeTypeDisplay(record.Type))
+            .Concat([
+                Localizer["incomeType.Salary"],
+                Localizer["incomeType.TaxRefund"],
+                Localizer["incomeType.Inheritance"],
+                Localizer["incomeType.Gift"],
+                Localizer["incomeType.Other"]
+            ])
+            .Where(type => !string.IsNullOrWhiteSpace(type))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(type => type)
+            .ToList();
 
     private void HandleChanged() => InvokeAsync(StateHasChanged);
 
@@ -366,13 +374,12 @@
         [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Amount must be greater than zero.")]
         public decimal Amount { get; set; }
 
-        [Range(2000, 2100, ErrorMessage = "Year must be between 2000 and 2100.")]
-        public int Year { get; set; }
+        [Required(ErrorMessage = "Date is required.")]
+        public DateTime? Date { get; set; }
 
-        [Range(1, 12, ErrorMessage = "Month must be between 1 and 12.")]
-        public int Month { get; set; }
-
-        public IncomeType Type { get; set; } = IncomeType.Salary;
+        [Required(ErrorMessage = "Subcategory is required.")]
+        [StringLength(60, ErrorMessage = "Subcategory must be 60 characters or fewer.")]
+        public string Type { get; set; } = string.Empty;
     }
 
     private sealed class MonthlySalaryFormModel : IValidatableObject
@@ -383,23 +390,21 @@
         [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Amount must be greater than zero.")]
         public decimal Amount { get; set; }
 
-        [Range(2000, 2100, ErrorMessage = "Start year must be between 2000 and 2100.")]
-        public int StartYear { get; set; }
+        [Required(ErrorMessage = "Start date is required.")]
+        public DateTime? StartDate { get; set; }
 
-        [Range(1, 12, ErrorMessage = "Start month must be between 1 and 12.")]
-        public int StartMonth { get; set; }
+        [Required(ErrorMessage = "End date is required.")]
+        public DateTime? EndDate { get; set; }
 
-        [Range(2000, 2100, ErrorMessage = "End year must be between 2000 and 2100.")]
-        public int EndYear { get; set; }
-
-        [Range(1, 12, ErrorMessage = "End month must be between 1 and 12.")]
-        public int EndMonth { get; set; }
+        public string Type { get; set; } = string.Empty;
 
         public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
         {
-            if (new DateOnly(EndYear, EndMonth, 1) < new DateOnly(StartYear, StartMonth, 1))
+            if (StartDate.HasValue &&
+                EndDate.HasValue &&
+                DateOnly.FromDateTime(EndDate.Value) < DateOnly.FromDateTime(StartDate.Value))
             {
-                yield return new ValidationResult("End period must be the same as or later than the start period.", [nameof(EndYear), nameof(EndMonth)]);
+                yield return new ValidationResult("End period must be the same as or later than the start period.", [nameof(EndDate)]);
             }
         }
     }
@@ -415,6 +420,8 @@
         [Range(2000, 2100, ErrorMessage = "Year must be between 2000 and 2100.")]
         public int Year { get; set; }
 
-        public IncomeType Type { get; set; } = IncomeType.Other;
+        [Required(ErrorMessage = "Subcategory is required.")]
+        [StringLength(60, ErrorMessage = "Subcategory must be 60 characters or fewer.")]
+        public string Type { get; set; } = string.Empty;
     }
 }

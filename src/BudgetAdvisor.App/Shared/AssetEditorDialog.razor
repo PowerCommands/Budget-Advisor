@@ -1,0 +1,137 @@
+@using System.ComponentModel.DataAnnotations
+@inject LocalizationService Localizer
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.h6">@Localizer[IsEditMode ? "assets.editAsset" : "assets.addAsset"]</MudText>
+
+        <EditForm EditContext="editContext" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-grid mt-3">
+                <div>
+                    <label class="form-label">@Localizer["field.name"]</label>
+                    <InputText class="form-control" @bind-Value="model.Name" />
+                    <ValidationMessage For="() => model.Name" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.type"]</label>
+                    <InputText class="form-control" @bind-Value="model.Type" list="asset-type-options" />
+                    <datalist id="asset-type-options">
+                        @foreach (var assetType in AssetTypeSuggestions)
+                        {
+                            <option value="@assetType"></option>
+                        }
+                    </datalist>
+                    <ValidationMessage For="() => model.Type" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.description"]</label>
+                    <InputText class="form-control" @bind-Value="model.Description" />
+                    <ValidationMessage For="() => model.Description" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["assets.purchaseValue"]</label>
+                    <InputNumber class="form-control" @bind-Value="model.PurchaseValue" />
+                    <ValidationMessage For="() => model.PurchaseValue" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["assets.estimatedSaleValue"]</label>
+                    <InputNumber class="form-control" @bind-Value="model.EstimatedSaleValue" />
+                    <ValidationMessage For="() => model.EstimatedSaleValue" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["assets.acquisitionDate"]</label>
+                    <InputDate class="form-control" @bind-Value="model.AcquisitionDate" />
+                    <ValidationMessage For="() => model.AcquisitionDate" />
+                </div>
+                @if (!IsEditMode)
+                {
+                    <div class="d-flex align-items-center gap-2 pt-4">
+                        <InputCheckbox class="form-check-input" @bind-Value="model.RegisterAsPurchase" />
+                        <label class="form-label mb-0">@Localizer["assets.registerAsPurchase"]</label>
+                    </div>
+                }
+            </div>
+        </EditForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">@Localizer["action.cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit">@Localizer[IsEditMode ? "action.save" : "action.create"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public bool IsEditMode { get; set; }
+
+    [Parameter]
+    public AssetDialogModel? InitialModel { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<string> AssetTypeSuggestions { get; set; } = [];
+
+    private AssetDialogModel model = new();
+    private EditContext editContext = default!;
+
+    protected override void OnInitialized()
+    {
+        model = InitialModel is null
+            ? new AssetDialogModel { AcquisitionDate = DateTime.Today }
+            : new AssetDialogModel
+            {
+                Name = InitialModel.Name,
+                Type = InitialModel.Type,
+                Description = InitialModel.Description,
+                PurchaseValue = InitialModel.PurchaseValue,
+                EstimatedSaleValue = InitialModel.EstimatedSaleValue,
+                AcquisitionDate = InitialModel.AcquisitionDate,
+                RegisterAsPurchase = InitialModel.RegisterAsPurchase
+            };
+
+        editContext = new EditContext(model);
+    }
+
+    private void Submit()
+    {
+        if (!editContext.Validate())
+        {
+            return;
+        }
+
+        HandleSubmit();
+    }
+
+    private void HandleSubmit() => MudDialog.Close(DialogResult.Ok(model));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    public sealed class AssetDialogModel
+    {
+        [Required(ErrorMessage = "Name is required.")]
+        [StringLength(100, ErrorMessage = "Name must be 100 characters or fewer.")]
+        public string Name { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Type is required.")]
+        [StringLength(60, ErrorMessage = "Type must be 60 characters or fewer.")]
+        public string Type { get; set; } = string.Empty;
+
+        [StringLength(200, ErrorMessage = "Description must be 200 characters or fewer.")]
+        public string Description { get; set; } = string.Empty;
+
+        [Range(typeof(decimal), "0.00", "999999999", ErrorMessage = "Purchase value must not be negative.")]
+        public decimal PurchaseValue { get; set; }
+
+        [Range(typeof(decimal), "0.00", "999999999", ErrorMessage = "Estimated sale value must not be negative.")]
+        public decimal EstimatedSaleValue { get; set; }
+
+        [Required(ErrorMessage = "Acquisition date is required.")]
+        public DateTime? AcquisitionDate { get; set; }
+
+        public bool RegisterAsPurchase { get; set; }
+    }
+}

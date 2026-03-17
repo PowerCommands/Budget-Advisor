@@ -1,0 +1,100 @@
+@using System.ComponentModel.DataAnnotations
+@inject LocalizationService Localizer
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.h6">@Localizer["assets.sellAsset"]</MudText>
+
+        <EditForm EditContext="editContext" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-grid mt-3">
+                <div>
+                    <label class="form-label">@Localizer["assets.saleDate"]</label>
+                    <InputDate class="form-control" @bind-Value="model.SaleDate" />
+                    <ValidationMessage For="() => model.SaleDate" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["assets.saleAmount"]</label>
+                    <InputNumber class="form-control" @bind-Value="model.SaleAmount" />
+                    <ValidationMessage For="() => model.SaleAmount" />
+                </div>
+                <div class="d-flex align-items-center gap-2 pt-4">
+                    <InputCheckbox class="form-check-input" @bind-Value="model.DepositDirectlyToBankAccount" />
+                    <label class="form-label mb-0">@Localizer["assets.depositDirectlyIntoBankAccount"]</label>
+                </div>
+                @if (model.DepositDirectlyToBankAccount)
+                {
+                    <div>
+                        <label class="form-label">@Localizer["assets.selectBankAccount"]</label>
+                        <InputSelect class="form-select" @bind-Value="model.BankAccountId">
+                            <option value="">@Localizer["assets.selectBankAccount"]</option>
+                            @foreach (var account in BankAccounts)
+                            {
+                                <option value="@account.Id">@account.AccountName</option>
+                            }
+                        </InputSelect>
+                        <ValidationMessage For="() => model.BankAccountId" />
+                    </div>
+                }
+            </div>
+        </EditForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">@Localizer["action.cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit">@Localizer["assets.sellAsset"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public IReadOnlyList<SavingsAccount> BankAccounts { get; set; } = [];
+
+    private SellAssetDialogModel model = new();
+    private EditContext editContext = default!;
+
+    protected override void OnInitialized()
+    {
+        model.SaleDate = DateTime.Today;
+        editContext = new EditContext(model);
+    }
+
+    private void Submit()
+    {
+        if (!editContext.Validate())
+        {
+            return;
+        }
+
+        HandleSubmit();
+    }
+
+    private void HandleSubmit() => MudDialog.Close(DialogResult.Ok(model));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    public sealed class SellAssetDialogModel : IValidatableObject
+    {
+        [Required(ErrorMessage = "Sale date is required.")]
+        public DateTime? SaleDate { get; set; }
+
+        [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Sale amount must be greater than zero.")]
+        public decimal SaleAmount { get; set; }
+
+        public bool DepositDirectlyToBankAccount { get; set; }
+
+        public Guid? BankAccountId { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (DepositDirectlyToBankAccount && !BankAccountId.HasValue)
+            {
+                yield return new ValidationResult("Bank account is required when direct deposit is selected.", [nameof(BankAccountId)]);
+            }
+        }
+    }
+}

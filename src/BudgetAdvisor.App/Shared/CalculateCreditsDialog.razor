@@ -1,0 +1,69 @@
+@using System.ComponentModel.DataAnnotations
+@inject LocalizationService Localizer
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.h6">@Localizer["credits.calculate"]</MudText>
+
+        <EditForm EditContext="editContext" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-grid mt-3">
+                <div>
+                    <label class="form-label">@Localizer["field.start"]</label>
+                    <InputDate class="form-control" @bind-Value="model.StartDate" />
+                    <ValidationMessage For="() => model.StartDate" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.end"]</label>
+                    <InputDate class="form-control" @bind-Value="model.EndDate" />
+                    <ValidationMessage For="() => model.EndDate" />
+                </div>
+            </div>
+        </EditForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">@Localizer["action.cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit">@Localizer["credits.calculate"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private CalculateCreditsDialogModel model = new();
+    private EditContext editContext = default!;
+
+    protected override void OnInitialized()
+    {
+        var currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        model.StartDate = currentMonth;
+        model.EndDate = currentMonth;
+        editContext = new EditContext(model);
+    }
+
+    private void Submit()
+    {
+        if (!editContext.Validate())
+        {
+            return;
+        }
+
+        HandleSubmit();
+    }
+
+    private void HandleSubmit() => MudDialog.Close(DialogResult.Ok(model));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    public sealed class CalculateCreditsDialogModel
+    {
+        [Required(ErrorMessage = "Start date is required.")]
+        public DateTime? StartDate { get; set; }
+
+        [Required(ErrorMessage = "End date is required.")]
+        public DateTime? EndDate { get; set; }
+    }
+}

@@ -52,8 +52,9 @@
                 <MudTabPanel Text="@Localizer["nav.start"]" Icon="@Icons.Material.Filled.SpaceDashboard" />
                 <MudTabPanel Text="@Localizer["nav.household"]" Icon="@Icons.Material.Filled.Groups" />
                 <MudTabPanel Text="@Localizer["nav.housingTab"]" Icon="@Icons.Material.Filled.HomeWork" />
+                <MudTabPanel Text="@Localizer["nav.transport"]" Icon="@Icons.Material.Filled.DirectionsCar" />
                 <MudTabPanel Text="@Localizer["nav.expenses"]" Icon="@Icons.Material.Filled.ReceiptLong" />
-                <MudTabPanel Text="@Localizer["nav.debts"]" Icon="@Icons.Material.Filled.CreditCard" />
+                <MudTabPanel Text="@Localizer["nav.credits"]" Icon="@Icons.Material.Filled.CreditCard" />
                 <MudTabPanel Text="@Localizer["nav.savings"]" Icon="@Icons.Material.Filled.Savings" />
                 <MudTabPanel Text="@Localizer["nav.assets"]" Icon="@Icons.Material.Filled.AccountBalanceWallet" />
                 <MudTabPanel Text="@Localizer["nav.settings"]" Icon="@Icons.Material.Filled.Settings" />
@@ -171,8 +172,9 @@
             "" => Localizer["nav.start"],
             "household" => Localizer["nav.household"],
             "housing" => Localizer["nav.housingTab"],
+            "transport" => Localizer["nav.transport"],
             "expenses" => Localizer["nav.expenses"],
-            "debts" => Localizer["nav.debts"],
+            "credits" or "debts" => Localizer["nav.credits"],
             "savings" => Localizer["nav.savings"],
             "assets" => Localizer["nav.assets"],
             "tools" => Localizer["nav.settings"],
@@ -193,11 +195,12 @@
             "" => 0,
             "household" => 1,
             "housing" => 2,
-            "expenses" => 3,
-            "debts" => 4,
-            "savings" => 5,
-            "assets" => 6,
-            "tools" or "settings" => 7,
+            "transport" => 3,
+            "expenses" => 4,
+            "credits" or "debts" => 5,
+            "savings" => 6,
+            "assets" => 7,
+            "tools" or "settings" => 8,
             _ => 0
         };
     }
@@ -209,11 +212,12 @@
             0 => "",
             1 => "household",
             2 => "housing",
-            3 => "expenses",
-            4 => "debts",
-            5 => "savings",
-            6 => "assets",
-            7 => "settings",
+            3 => "transport",
+            4 => "expenses",
+            5 => "credits",
+            6 => "savings",
+            7 => "assets",
+            8 => "settings",
             _ => ""
         };
 

@@ -1,9 +1,382 @@
+@page "/credits"
 @page "/debts"
+@implements IDisposable
+@inject ApplicationState AppState
+@inject IDialogService DialogService
 @inject LocalizationService Localizer
 
-<PageTitle>Budget Advisor - @Localizer["nav.debts"]</PageTitle>
+<PageTitle>Budget Advisor - @Localizer["nav.credits"]</PageTitle>
 
-<section class="placeholder-panel">
-    <h1>@Localizer["nav.debts"]</h1>
-    <p>@Localizer["placeholder.futureTab"]</p>
-</section>
+@if (!string.IsNullOrWhiteSpace(statusMessage))
+{
+    <div class="status-banner">@statusMessage</div>
+}
+
+<MudTabs Class="section-tabs" Rounded="true" SliderColor="Color.Primary" Elevation="0">
+    <MudTabPanel Text="@Localizer["credits.overviewTab"]" Icon="@Icons.Material.Filled.Dashboard">
+        <section class="card-panel">
+            <div class="section-title-row">
+                <h2>@Localizer["start.keyMetrics"]</h2>
+                <span class="section-note">@GetCurrentMonthLabel()</span>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card"><span>@Localizer["credits.creditCount"]</span><strong>@CreditCount</strong></div>
+                <div class="stat-card"><span>@Localizer["credits.highestInterestRate"]</span><strong>@FormatRate(HighestInterestRate)</strong></div>
+                <div class="stat-card"><span>@Localizer["credits.lowestInterestRate"]</span><strong>@FormatRate(LowestInterestRate)</strong></div>
+                <div class="stat-card"><span>@Localizer["credits.totalCurrentDebt"]</span><strong>@AppState.FormatCurrency(TotalRemainingDebt)</strong></div>
+                <div class="stat-card"><span>@Localizer["credits.totalMaximumCredit"]</span><strong>@AppState.FormatCurrency(TotalCreditLimit)</strong></div>
+            </div>
+        </section>
+
+        <section class="card-panel mt-4">
+            <h2>@Localizer["credits.overviewTable"]</h2>
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["field.name"]</th>
+                            <th>@Localizer["credits.provider"]</th>
+                            <th>@Localizer["credits.startDate"]</th>
+                            <th>@Localizer["credits.monthlyInterestRate"]</th>
+                            <th>@Localizer["credits.creditLimit"]</th>
+                            <th>@Localizer["credits.remainingDebt"]</th>
+                            <th>@Localizer["credits.availableCredit"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!Credits.Any())
+                        {
+                            <tr>
+                                <td colspan="7" class="empty-state">@Localizer["credits.noCredits"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var credit in Credits)
+                            {
+                                <tr>
+                                    <td>@credit.Name</td>
+                                    <td>@credit.Provider</td>
+                                    <td>@FormatDate(credit.StartDate)</td>
+                                    <td>@FormatRate(credit.MonthlyInterestRate)</td>
+                                    <td>@AppState.FormatCurrency(credit.CreditLimit)</td>
+                                    <td>@AppState.FormatCurrency(credit.RemainingDebt)</td>
+                                    <td>@AppState.FormatCurrency(GetAvailableCredit(credit))</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["credits.manageTab"]" Icon="@Icons.Material.Filled.EditNote">
+        <div class="d-flex justify-content-end mb-3">
+            <button class="btn btn-outline-primary" @onclick="HandleCreateCreditAsync">@Localizer["credits.createCredit"]</button>
+        </div>
+
+        @if (!Credits.Any())
+        {
+            <section class="card-panel">
+                <p class="empty-state mb-0">@Localizer["credits.noCredits"]</p>
+            </section>
+        }
+        else
+        {
+            @foreach (var credit in Credits)
+            {
+                <section class="card-panel mt-4">
+                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+                        <div>
+                            <h2>@credit.Name</h2>
+                            <div class="form-grid">
+                                <div>
+                                    <label class="form-label">@Localizer["credits.provider"]</label>
+                                    <div>@credit.Provider</div>
+                                </div>
+                                <div>
+                                    <label class="form-label">@Localizer["credits.startDate"]</label>
+                                    <div>@FormatDate(credit.StartDate)</div>
+                                </div>
+                                <div>
+                                    <label class="form-label">@Localizer["credits.creditLimit"]</label>
+                                    <div>@AppState.FormatCurrency(credit.CreditLimit)</div>
+                                </div>
+                                <div>
+                                    <label class="form-label">@Localizer["credits.remainingDebt"]</label>
+                                    <div>@AppState.FormatCurrency(credit.RemainingDebt)</div>
+                                </div>
+                                <div>
+                                    <label class="form-label">@Localizer["credits.monthlyInterestRate"]</label>
+                                    <div>@FormatRate(credit.MonthlyInterestRate)</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="button-row">
+                            <button class="btn btn-outline-primary" @onclick="() => HandleRegisterPurchaseAsync(credit)">@Localizer["credits.registerPurchase"]</button>
+                            <button class="btn btn-outline-primary" @onclick="() => HandlePostMonthAsync(credit)">@Localizer["credits.postMonth"]</button>
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Color="Color.Error"
+                                           Size="Size.Small"
+                                           OnClick="@(() => HandleDeleteCreditAsync(credit))" />
+                        </div>
+                    </div>
+
+                    <section class="card-panel mt-4">
+                        <h3>@Localizer["credits.purchaseTable"]</h3>
+                        <div class="table-responsive">
+                            <table class="table app-table">
+                                <thead>
+                                    <tr>
+                                        <th>@Localizer["credits.month"]</th>
+                                        <th>@Localizer["field.mainCategory"]</th>
+                                        <th>@Localizer["field.subcategory"]</th>
+                                        <th>@Localizer["field.amount"]</th>
+                                        <th>@Localizer["field.metadata"]</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (!GetCreditEvents(credit.Id).Any())
+                                    {
+                                        <tr>
+                                            <td colspan="5" class="empty-state">@Localizer["credits.noPurchases"]</td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var expense in GetCreditEvents(credit.Id))
+                                        {
+                                            <tr>
+                                                <td>@($"{expense.Year:0000}/{expense.Month:00}")</td>
+                                                <td>@Localizer[$"expenseCategory.{expense.Category}"]</td>
+                                                <td>@AppState.GetExpenseSubcategoryDisplay(expense)</td>
+                                                <td>@AppState.FormatCurrency(expense.Amount)</td>
+                                                <td>@AppState.GetExpenseMetadataDisplay(expense.Metadata)</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </section>
+            }
+        }
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private static readonly IReadOnlyList<ExpenseCategory> PurchaseCategories =
+    [
+        ExpenseCategory.Housing,
+        ExpenseCategory.Transport,
+        ExpenseCategory.Food,
+        ExpenseCategory.Clothing,
+        ExpenseCategory.Other
+    ];
+
+    private string? statusMessage;
+
+    private IReadOnlyList<Credit> Credits =>
+        AppState.Data.Credits
+            .OrderBy(credit => credit.Name)
+            .ThenBy(credit => credit.Provider)
+            .ThenBy(credit => credit.StartDate)
+            .ToList();
+
+    private int CreditCount => Credits.Count;
+    private decimal HighestInterestRate => Credits.Count == 0 ? 0m : Credits.Max(credit => credit.MonthlyInterestRate);
+    private decimal LowestInterestRate => Credits.Count == 0 ? 0m : Credits.Min(credit => credit.MonthlyInterestRate);
+    private decimal TotalRemainingDebt => Credits.Sum(credit => credit.RemainingDebt);
+    private decimal TotalCreditLimit => Credits.Sum(credit => credit.CreditLimit);
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += HandleChanged;
+        Localizer.Changed += HandleChanged;
+    }
+
+    private async Task HandleCreateCreditAsync()
+    {
+        var dialog = await DialogService.ShowAsync<CreateCreditDialog>(Localizer["credits.createCredit"]);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not CreateCreditDialog.CreateCreditDialogModel model || !model.StartDate.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            await AppState.AddCreditAsync(
+                model.Name,
+                model.Provider,
+                DateOnly.FromDateTime(model.StartDate.Value),
+                model.CreditLimit,
+                model.RemainingDebt,
+                model.MonthlyInterestRate,
+                model.ResetAtEndOfMonth);
+            statusMessage = Localizer["credits.creditAdded"];
+        }
+        catch (InvalidOperationException)
+        {
+            statusMessage = Localizer["validation.creditInvalidValues"];
+        }
+    }
+
+    private async Task HandleRegisterPurchaseAsync(Credit credit)
+    {
+        var parameters = new DialogParameters<RegisterCreditPurchaseDialog>
+        {
+            { dialog => dialog.Categories, PurchaseCategories },
+            { dialog => dialog.SubcategorySuggestions, GetPurchaseSubcategorySuggestions() }
+        };
+
+        var dialog = await DialogService.ShowAsync<RegisterCreditPurchaseDialog>(Localizer["credits.registerPurchase"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not RegisterCreditPurchaseDialog.RegisterCreditPurchaseDialogModel model || !model.Date.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            await AppState.AddCreditPurchaseAsync(
+                credit.Id,
+                DateOnly.FromDateTime(model.Date.Value),
+                model.Amount,
+                model.Category,
+                model.Subcategory);
+            statusMessage = Localizer["credits.purchaseRegistered"];
+        }
+        catch (InvalidOperationException)
+        {
+            statusMessage = Localizer["validation.creditPurchaseLimitExceeded"];
+        }
+    }
+
+    private async Task HandlePostMonthAsync(Credit credit)
+    {
+        var parameters = new DialogParameters<PostCreditMonthDialog>
+        {
+            { dialog => dialog.RemainingDebt, credit.RemainingDebt }
+        };
+
+        var dialog = await DialogService.ShowAsync<PostCreditMonthDialog>(Localizer["credits.postMonth"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not PostCreditMonthDialog.PostCreditMonthDialogModel model || !model.Month.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            await AppState.PostCreditMonthAsync(
+                credit.Id,
+                DateOnly.FromDateTime(model.Month.Value),
+                model.AmortizationAmount,
+                model.PayFullAmount);
+            statusMessage = Localizer["credits.monthPosted"];
+        }
+        catch (InvalidOperationException)
+        {
+            statusMessage = Localizer["validation.creditAmortizationExceedsDebt"];
+        }
+    }
+
+    private async Task HandleDeleteCreditAsync(Credit credit)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["credits.deleteCreditMessage"], credit.Name) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveCreditAsync(credit.Id);
+        statusMessage = Localizer["credits.creditDeleted"];
+    }
+
+    private IReadOnlyList<ExpenseEntry> GetCreditEvents(Guid creditId) =>
+        AppState.Data.ExpenseRecords
+            .Where(record =>
+                record.CreditId == creditId &&
+                record.CreditCostSource is CreditCostSource.ManualPurchase or CreditCostSource.ManualAmortization or CreditCostSource.GeneratedInterest)
+            .OrderByDescending(record => record.Year)
+            .ThenByDescending(record => record.Month)
+            .ThenBy(record => record.CreditCostSource)
+            .ThenBy(record => record.Category)
+            .ThenBy(record => record.Subcategory)
+            .ToList();
+
+    private IReadOnlyList<string> GetPurchaseSubcategorySuggestions() =>
+        AppState.Data.ExpenseRecords
+            .Where(record =>
+                record.CreditCostSource == CreditCostSource.ManualPurchase &&
+                !string.IsNullOrWhiteSpace(record.Subcategory))
+            .Select(record => record.Subcategory.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value)
+            .ToList();
+
+    private static string FormatDate(DateOnly date) => date.ToString("yyyy-MM-dd");
+
+    private static string FormatRate(decimal rate) => $"{rate:0.##}%";
+
+    private decimal GetAvailableCredit(Credit credit) => Math.Max(credit.CreditLimit - credit.RemainingDebt, 0m);
+
+    private string GetCurrentMonthLabel() => $"{Localizer[$"month.{DateTime.Today.Month}"]} {DateTime.Today.Year}";
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AppState.Changed -= HandleChanged;
+        Localizer.Changed -= HandleChanged;
+    }
+}

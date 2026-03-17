@@ -1,9 +1,261 @@
 @page "/assets"
+@implements IDisposable
+@inject ApplicationState AppState
+@inject IDialogService DialogService
 @inject LocalizationService Localizer
 
 <PageTitle>Budget Advisor - @Localizer["nav.assets"]</PageTitle>
 
-<section class="placeholder-panel">
-    <h1>@Localizer["nav.assets"]</h1>
-    <p>@Localizer["placeholder.futureTab"]</p>
+@if (!string.IsNullOrWhiteSpace(statusMessage))
+{
+    <div class="status-banner">@statusMessage</div>
+}
+
+<div class="d-flex justify-content-end mb-3">
+    <button class="btn btn-outline-primary" @onclick="HandleAddAssetAsync">@Localizer["assets.addAsset"]</button>
+</div>
+
+<section class="card-panel">
+    <div class="section-title-row">
+        <h2>@Localizer["nav.assets"]</h2>
+    </div>
+
+    <div class="form-grid mb-3">
+        <div>
+            <label class="form-label">@Localizer["filter.name"]</label>
+            <InputText class="form-control" @bind-Value="nameFilter" />
+        </div>
+        <div>
+            <label class="form-label">@Localizer["field.type"]</label>
+            <InputText class="form-control" @bind-Value="typeFilter" list="asset-type-filter-options" />
+            <datalist id="asset-type-filter-options">
+                @foreach (var type in AssetTypeSuggestions)
+                {
+                    <option value="@type"></option>
+                }
+            </datalist>
+        </div>
+        <div>
+            <label class="form-label">@Localizer["assets.status"]</label>
+            <InputSelect class="form-select" @bind-Value="statusFilter">
+                <option value="">@Localizer["filter.allCategories"]</option>
+                <option value="Active">@Localizer["assets.active"]</option>
+                <option value="Sold">@Localizer["assets.sold"]</option>
+            </InputSelect>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table app-table">
+            <thead>
+                <tr>
+                    <th>@Localizer["field.name"]</th>
+                    <th>@Localizer["field.type"]</th>
+                    <th>@Localizer["assets.estimatedSaleValue"]</th>
+                    <th>@Localizer["assets.acquisitionDate"]</th>
+                    <th>@Localizer["assets.status"]</th>
+                    <th>@Localizer["field.actions"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!FilteredAssets.Any())
+                {
+                    <tr>
+                        <td colspan="6" class="empty-state">@Localizer["assets.noAssets"]</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var asset in FilteredAssets)
+                    {
+                        <tr>
+                            <td>@AppState.GetAssetNameDisplay(asset)</td>
+                            <td>@AppState.GetAssetTypeDisplay(asset)</td>
+                            <td>@AppState.FormatCurrency(asset.EstimatedSaleValue)</td>
+                            <td>@asset.AcquisitionDate.ToString("yyyy-MM-dd")</td>
+                            <td>@Localizer[asset.IsSold ? "assets.sold" : "assets.active"]</td>
+                            <td>
+                                <button class="btn btn-outline-primary btn-sm me-2" @onclick="() => HandleEditAssetAsync(asset)">@Localizer["assets.editAsset"]</button>
+                                @if (!asset.IsSold)
+                                {
+                                    <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleSellAssetAsync(asset)">@Localizer["assets.sellAsset"]</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
 </section>
+
+@code {
+    private string? statusMessage;
+    private string nameFilter = string.Empty;
+    private string typeFilter = string.Empty;
+    private string statusFilter = string.Empty;
+
+    private IReadOnlyList<AssetItem> FilteredAssets =>
+        AppState.Data.Assets
+            .Where(asset =>
+                string.IsNullOrWhiteSpace(nameFilter) ||
+                asset.Name.Contains(nameFilter.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                asset.Description.Contains(nameFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(asset =>
+                string.IsNullOrWhiteSpace(typeFilter) ||
+                asset.Type.Contains(typeFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(asset => statusFilter switch
+            {
+                "Active" => !asset.IsSold,
+                "Sold" => asset.IsSold,
+                _ => true
+            })
+            .OrderBy(asset => asset.IsSold)
+            .ThenBy(asset => asset.Name)
+            .ToList();
+
+    private IReadOnlyList<string> AssetTypeSuggestions =>
+        AppState.Data.Assets
+            .Select(asset => asset.Type?.Trim() ?? string.Empty)
+            .Where(type => !string.IsNullOrWhiteSpace(type))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(type => type)
+            .ToList();
+
+    private IReadOnlyList<SavingsAccount> BankAccounts =>
+        AppState.Data.SavingsAccounts
+            .Where(account => account.AccountType == SavingsAccountType.Bank)
+            .OrderBy(account => account.AccountName)
+            .ToList();
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += HandleChanged;
+        Localizer.Changed += HandleChanged;
+    }
+
+    private async Task HandleAddAssetAsync()
+    {
+        var parameters = new DialogParameters<AssetEditorDialog>
+        {
+            { dialog => dialog.IsEditMode, false },
+            { dialog => dialog.AssetTypeSuggestions, AssetTypeSuggestions }
+        };
+
+        var dialog = await DialogService.ShowAsync<AssetEditorDialog>(Localizer["assets.addAsset"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not AssetEditorDialog.AssetDialogModel model || !model.AcquisitionDate.HasValue)
+        {
+            return;
+        }
+
+        await AppState.AddAssetAsync(
+            model.Name,
+            model.Type,
+            model.Description,
+            model.PurchaseValue,
+            model.EstimatedSaleValue,
+            DateOnly.FromDateTime(model.AcquisitionDate.Value),
+            model.RegisterAsPurchase);
+
+        statusMessage = Localizer["assets.assetAdded"];
+    }
+
+    private async Task HandleEditAssetAsync(AssetItem asset)
+    {
+        var parameters = new DialogParameters<AssetEditorDialog>
+        {
+            { dialog => dialog.IsEditMode, true },
+            { dialog => dialog.AssetTypeSuggestions, AssetTypeSuggestions },
+            { dialog => dialog.InitialModel, new AssetEditorDialog.AssetDialogModel
+                {
+                    Name = AppState.GetAssetNameDisplay(asset),
+                    Type = AppState.GetAssetTypeDisplay(asset),
+                    Description = AppState.GetAssetDescriptionDisplay(asset),
+                    PurchaseValue = asset.PurchaseValue,
+                    EstimatedSaleValue = asset.EstimatedSaleValue,
+                    AcquisitionDate = asset.AcquisitionDate.ToDateTime(TimeOnly.MinValue)
+                }
+            }
+        };
+
+        var dialog = await DialogService.ShowAsync<AssetEditorDialog>(Localizer["assets.editAsset"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not AssetEditorDialog.AssetDialogModel model || !model.AcquisitionDate.HasValue)
+        {
+            return;
+        }
+
+        await AppState.UpdateAssetAsync(
+            asset.Id,
+            model.Name,
+            model.Type,
+            model.Description,
+            model.PurchaseValue,
+            model.EstimatedSaleValue,
+            DateOnly.FromDateTime(model.AcquisitionDate.Value));
+
+        statusMessage = Localizer["assets.assetUpdated"];
+    }
+
+    private async Task HandleSellAssetAsync(AssetItem asset)
+    {
+        var parameters = new DialogParameters<SellAssetDialog>
+        {
+            { dialog => dialog.BankAccounts, BankAccounts }
+        };
+
+        var dialog = await DialogService.ShowAsync<SellAssetDialog>(Localizer["assets.sellAsset"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not SellAssetDialog.SellAssetDialogModel model || !model.SaleDate.HasValue)
+        {
+            return;
+        }
+
+        await AppState.SellAssetAsync(
+            asset.Id,
+            DateOnly.FromDateTime(model.SaleDate.Value),
+            model.SaleAmount,
+            model.DepositDirectlyToBankAccount ? model.BankAccountId : null);
+
+        statusMessage = Localizer["assets.assetSold"];
+    }
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AppState.Changed -= HandleChanged;
+        Localizer.Changed -= HandleChanged;
+    }
+}

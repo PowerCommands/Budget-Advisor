@@ -1,0 +1,94 @@
+@using System.ComponentModel.DataAnnotations
+@inject LocalizationService Localizer
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.h6">@Localizer["credits.postMonth"]</MudText>
+
+        <EditForm EditContext="editContext" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-grid mt-3">
+                <div>
+                    <label class="form-label">@Localizer["credits.month"]</label>
+                    <InputDate class="form-control" @bind-Value="model.Month" />
+                    <ValidationMessage For="() => model.Month" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["credits.amortizationAmount"]</label>
+                    <InputNumber class="form-control" @bind-Value="model.AmortizationAmount" disabled="@model.PayFullAmount" />
+                    <ValidationMessage For="() => model.AmortizationAmount" />
+                </div>
+                <div class="d-flex align-items-center gap-2 pt-4">
+                    <InputCheckbox class="form-check-input" @bind-Value="model.PayFullAmount" />
+                    <label class="form-label mb-0">@Localizer["credits.payFullAmount"]</label>
+                </div>
+            </div>
+        </EditForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">@Localizer["action.cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit">@Localizer["credits.post"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public decimal RemainingDebt { get; set; }
+
+    private PostCreditMonthDialogModel model = new();
+    private EditContext editContext = default!;
+
+    protected override void OnInitialized()
+    {
+        model.Month = DateTime.Today;
+        editContext = new EditContext(model);
+    }
+
+    private void Submit()
+    {
+        if (model.PayFullAmount)
+        {
+            model.AmortizationAmount = RemainingDebt;
+        }
+
+        if (!editContext.Validate())
+        {
+            return;
+        }
+
+        HandleSubmit();
+    }
+
+    private void HandleSubmit() => MudDialog.Close(DialogResult.Ok(model));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    public sealed class PostCreditMonthDialogModel : IValidatableObject
+    {
+        [Required(ErrorMessage = "Month is required.")]
+        public DateTime? Month { get; set; }
+
+        [Range(typeof(decimal), "0.00", "999999999", ErrorMessage = "Amortization amount must not be negative.")]
+        public decimal AmortizationAmount { get; set; }
+
+        public bool PayFullAmount { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (PayFullAmount)
+            {
+                yield break;
+            }
+
+            if (AmortizationAmount < 0m)
+            {
+                yield return new ValidationResult("Amortization amount must not be negative.", [nameof(AmortizationAmount)]);
+            }
+        }
+    }
+}

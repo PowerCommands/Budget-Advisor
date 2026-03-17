@@ -19,12 +19,29 @@
         <div class="stat-card"><span>@Localizer["reporting.clothing"]</span><strong>@AppState.FormatCurrency(overview.Clothing)</strong></div>
         <div class="stat-card"><span>@Localizer["reporting.savings"]</span><strong>@AppState.FormatCurrency(overview.Savings)</strong></div>
         <div class="stat-card"><span>@Localizer["reporting.other"]</span><strong>@AppState.FormatCurrency(overview.Other)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.credits"]</span><strong>@AppState.FormatCurrency(overview.Credits)</strong></div>
         <div class="@GetBalanceCardClass()">
             <span>@Localizer["reporting.balanceStatus"]</span>
             <strong>@GetBalanceStatusText()</strong>
             <small>@AppState.FormatCurrency(overview.NetChange)</small>
         </div>
+    </div>
+</section>
+
+<section class="card-panel mt-4">
+    <div class="section-title-row">
+        <h2>@Localizer["start.keyMetrics"]</h2>
+        <span class="section-note">@GetMonthLabel(DateTime.Today.Year, DateTime.Today.Month)</span>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card"><span>@Localizer["metrics.loanToValueRatio"]</span><strong>@FormatPercentage(keyMetrics.LoanToValueRatio)</strong></div>
+        <div class="stat-card"><span>@Localizer["table.housingLoans"]</span><strong>@AppState.FormatCurrency(keyMetrics.HousingLoans)</strong></div>
+        <div class="stat-card"><span>@Localizer["metrics.propertyValue"]</span><strong>@AppState.FormatCurrency(keyMetrics.PropertyValue)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.credits"]</span><strong>@AppState.FormatCurrency(keyMetrics.Credits)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.savings"]</span><strong>@AppState.FormatCurrency(keyMetrics.Savings)</strong></div>
+        <div class="stat-card"><span>@Localizer["table.interest"]</span><strong>@AppState.FormatCurrency(keyMetrics.Interest)</strong></div>
+        <div class="stat-card"><span>@Localizer["table.amortization"]</span><strong>@AppState.FormatCurrency(keyMetrics.Amortization)</strong></div>
+        <div class="stat-card"><span>@Localizer["table.balance"]</span><strong>@AppState.FormatCurrency(keyMetrics.Balance)</strong></div>
     </div>
 </section>
 
@@ -49,11 +66,14 @@
         <table class="table app-table">
             <thead>
                 <tr>
-                    <th>@Localizer["table.year"]</th>
-                    <th>@Localizer["table.month"]</th>
+                    <th>@Localizer["table.period"]</th>
                     <th>@Localizer["reporting.income"]</th>
                     <th>@Localizer["table.expenses"]</th>
-                    <th>@Localizer["table.change"]</th>
+                    <th>@Localizer["table.housingLoans"]</th>
+                    <th>@Localizer["reporting.credits"]</th>
+                    <th>@Localizer["reporting.savings"]</th>
+                    <th>@Localizer["table.interest"]</th>
+                    <th>@Localizer["table.amortization"]</th>
                     <th>@Localizer["table.balance"]</th>
                 </tr>
             </thead>
@@ -61,11 +81,14 @@
                 @foreach (var row in reportRows)
                 {
                     <tr>
-                        <td>@row.Year</td>
-                        <td>@GetMonthName(row.Month)</td>
+                        <td>@row.Period</td>
                         <td>@AppState.FormatCurrency(row.Income)</td>
                         <td>@AppState.FormatCurrency(row.Expenses)</td>
-                        <td>@AppState.FormatCurrency(row.Change)</td>
+                        <td>@AppState.FormatCurrency(row.HousingLoans)</td>
+                        <td>@AppState.FormatCurrency(row.Credits)</td>
+                        <td>@AppState.FormatCurrency(row.Savings)</td>
+                        <td>@AppState.FormatCurrency(row.Interest)</td>
+                        <td>@AppState.FormatCurrency(row.Amortization)</td>
                         <td>@AppState.FormatCurrency(row.Balance)</td>
                     </tr>
                 }
@@ -76,6 +99,7 @@
 
 @code {
     private MonthlyOverview overview = new();
+    private DashboardKeyMetrics keyMetrics = new();
     private IReadOnlyList<MonthlyReportRow> reportRows = [];
     private DateTime? reportStartDate;
     private DateTime? reportEndDate;
@@ -93,6 +117,7 @@
     private void LoadData()
     {
         overview = AppState.GetMonthlyOverview(DateTime.Today.Year, DateTime.Today.Month);
+        keyMetrics = AppState.GetCurrentDashboardKeyMetrics();
 
         var start = reportStartDate ?? DateTime.Today;
         var end = reportEndDate ?? DateTime.Today;
@@ -130,6 +155,8 @@
     private string GetBalanceCardClass() => IsBalanced()
         ? "stat-card stat-card-balance-ok"
         : "stat-card stat-card-balance-nok";
+
+    private static string FormatPercentage(decimal value) => $"{value:P1}";
 
     public void Dispose()
     {

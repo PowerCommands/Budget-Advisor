@@ -102,6 +102,10 @@ a, .btn-link {
     margin-bottom: 1rem;
 }
 
+.section-tabs {
+    margin-bottom: 1.5rem;
+}
+
 .report-filter-row {
     display: flex;
     gap: 0.75rem;
@@ -154,6 +158,16 @@ a, .btn-link {
 .stat-card-balance-nok {
     background: color-mix(in srgb, var(--mud-palette-action-disabled-background) 70%, var(--mud-palette-surface));
     border-color: color-mix(in srgb, var(--mud-palette-action-disabled) 45%, var(--mud-palette-lines-default));
+}
+
+.stat-card-change-positive {
+    background: color-mix(in srgb, var(--mud-palette-success) 16%, var(--mud-palette-surface));
+    border-color: color-mix(in srgb, var(--mud-palette-success) 40%, var(--mud-palette-lines-default));
+}
+
+.stat-card-change-negative {
+    background: color-mix(in srgb, var(--mud-palette-error) 12%, var(--mud-palette-surface));
+    border-color: color-mix(in srgb, var(--mud-palette-error) 35%, var(--mud-palette-lines-default));
 }
 
 .form-grid {

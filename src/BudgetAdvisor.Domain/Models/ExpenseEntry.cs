@@ -16,7 +16,31 @@ public sealed class ExpenseEntry
 
     public string Subcategory { get; set; } = string.Empty;
 
+    public string Metadata { get; set; } = string.Empty;
+
     public Guid? SubscriptionDefinitionId { get; set; }
+
+    public Guid? HousingDefinitionId { get; set; }
+
+    public Guid? TransportDefinitionId { get; set; }
+
+    public Guid? LoanId { get; set; }
+
+    public Guid? LoanInterestBindingPeriodId { get; set; }
+
+    public Guid? LoanAmortizationPlanId { get; set; }
+
+    public Guid? TransportLeasingContractId { get; set; }
+
+    public Guid? TransportVehicleId { get; set; }
+
+    public Guid? CreditId { get; set; }
+
+    public Guid? SavingsAccountId { get; set; }
+
+    public Guid? AssetId { get; set; }
+
+    public CreditCostSource? CreditCostSource { get; set; }
 
     public string Description { get; set; } = string.Empty;
 }

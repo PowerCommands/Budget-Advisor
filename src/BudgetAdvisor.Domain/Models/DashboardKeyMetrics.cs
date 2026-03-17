@@ -1,14 +1,12 @@
 namespace BudgetAdvisor.Domain.Models;
 
-public sealed class MonthlyReportRow
+public sealed class DashboardKeyMetrics
 {
-    public string Period { get; set; } = string.Empty;
-
-    public decimal Income { get; set; }
-
-    public decimal Expenses { get; set; }
+    public decimal LoanToValueRatio { get; set; }
 
     public decimal HousingLoans { get; set; }
+
+    public decimal PropertyValue { get; set; }
 
     public decimal Credits { get; set; }
 
@@ -19,4 +17,6 @@ public sealed class MonthlyReportRow
     public decimal Amortization { get; set; }
 
     public decimal Balance { get; set; }
+
+    public decimal Change { get; set; }
 }

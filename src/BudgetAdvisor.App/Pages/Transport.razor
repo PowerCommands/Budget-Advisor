@@ -1,64 +1,37 @@
-@page "/housing"
+@page "/transport"
 @using System.ComponentModel.DataAnnotations
 @implements IDisposable
 @inject ApplicationState AppState
 @inject IDialogService DialogService
 @inject LocalizationService Localizer
 
-<PageTitle>Budget Advisor - @Localizer["nav.housingTab"]</PageTitle>
+<PageTitle>Budget Advisor - @Localizer["nav.transport"]</PageTitle>
 
 @if (!string.IsNullOrWhiteSpace(statusMessage))
 {
     <div class="status-banner">@statusMessage</div>
 }
 
-<section class="card-panel mb-4">
-    <h2>@Localizer["housing.homeResidence"]</h2>
-    <EditForm EditContext="homeResidenceEditContext" OnValidSubmit="HandleSaveHomeResidenceAsync">
-        <DataAnnotationsValidator />
-        <ValidationSummary />
-        <div class="form-grid">
-            <div>
-                <label class="form-label">@Localizer["housing.residenceType"]</label>
-                <InputSelect class="form-select" @bind-Value="homeResidenceForm.ResidenceType">
-                    @foreach (var option in ResidenceTypeOptions)
-                    {
-                        <option value="@option.Type">@Localizer[option.LabelKey]</option>
-                    }
-                </InputSelect>
-            </div>
-            @if (ShowsOwnedResidenceFields)
-            {
-                <div>
-                    <label class="form-label">@Localizer["housing.purchaseYear"]</label>
-                    <InputNumber class="form-control" @bind-Value="homeResidenceForm.PurchaseYear" />
-                    <ValidationMessage For="() => homeResidenceForm.PurchaseYear" />
-                </div>
-                <div>
-                    <label class="form-label">@Localizer["housing.purchasePrice"]</label>
-                    <InputNumber class="form-control" @bind-Value="homeResidenceForm.PurchasePrice" />
-                    <ValidationMessage For="() => homeResidenceForm.PurchasePrice" />
-                </div>
-                <div>
-                    <label class="form-label">@Localizer["housing.currentMarketValue"]</label>
-                    <InputNumber class="form-control" @bind-Value="homeResidenceForm.CurrentMarketValue" />
-                    <ValidationMessage For="() => homeResidenceForm.CurrentMarketValue" />
-                </div>
-            }
-        </div>
-        <button class="btn btn-primary" type="submit">@Localizer["action.save"]</button>
-    </EditForm>
-</section>
-
 <MudTabs Class="section-tabs" Rounded="true" SliderColor="Color.Primary" Elevation="0">
-    <MudTabPanel Text="@Localizer["housing.costsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
+    <MudTabPanel Text="@Localizer["transport.costsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
         <div class="stack-grid two-up">
             <section class="card-panel">
-                <h2>@Localizer["housing.oneTimeCost"]</h2>
+                <h2>@Localizer["transport.oneTimeCost"]</h2>
                 <EditForm EditContext="costEditContext" OnValidSubmit="HandleAddCostAsync">
                     <DataAnnotationsValidator />
                     <ValidationSummary />
                     <div class="form-grid">
+                        <div>
+                            <label class="form-label">@Localizer["transport.vehicle"]</label>
+                            <InputSelect class="form-select" @bind-Value="costForm.VehicleId">
+                                <option value="">@Localizer["transport.selectVehicle"]</option>
+                                @foreach (var vehicle in TransportVehicles)
+                                {
+                                    <option value="@vehicle.Id">@vehicle.Name</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="() => costForm.VehicleId" />
+                        </div>
                         <div>
                             <label class="form-label">@Localizer["field.description"]</label>
                             <InputText class="form-control" @bind-Value="costForm.Description" />
@@ -76,8 +49,8 @@
                         </div>
                         <div>
                             <label class="form-label">@Localizer["field.subcategory"]</label>
-                            <InputText class="form-control" @bind-Value="costForm.Subcategory" list="housing-cost-subcategories" />
-                            <datalist id="housing-cost-subcategories">
+                            <InputText class="form-control" @bind-Value="costForm.Subcategory" list="transport-cost-subcategories" />
+                            <datalist id="transport-cost-subcategories">
                                 @foreach (var subcategory in GetSubcategorySuggestions())
                                 {
                                     <option value="@subcategory"></option>
@@ -86,25 +59,31 @@
                             <ValidationMessage For="() => costForm.Subcategory" />
                         </div>
                     </div>
-                    <button class="btn btn-primary" type="submit">@Localizer["action.addHousingCost"]</button>
+                    <button class="btn btn-primary" type="submit">@Localizer["action.addTransportCost"]</button>
                 </EditForm>
             </section>
 
             <section class="card-panel">
-                <h2>@Localizer["housing.series"]</h2>
+                <h2>@Localizer["transport.series"]</h2>
                 <EditForm EditContext="definitionEditContext" OnValidSubmit="HandleAddDefinitionAsync">
                     <DataAnnotationsValidator />
                     <ValidationSummary />
                     <div class="form-grid">
                         <div>
-                            <label class="form-label">@Localizer["field.description"]</label>
-                            <InputText class="form-control" @bind-Value="definitionForm.Description" />
-                            <ValidationMessage For="() => definitionForm.Description" />
+                            <label class="form-label">@Localizer["transport.vehicle"]</label>
+                            <InputSelect class="form-select" @bind-Value="definitionForm.VehicleId">
+                                <option value="">@Localizer["transport.selectVehicle"]</option>
+                                @foreach (var vehicle in TransportVehicles)
+                                {
+                                    <option value="@vehicle.Id">@vehicle.Name</option>
+                                }
+                            </InputSelect>
+                            <ValidationMessage For="() => definitionForm.VehicleId" />
                         </div>
                         <div>
                             <label class="form-label">@Localizer["field.subcategory"]</label>
-                            <InputText class="form-control" @bind-Value="definitionForm.Subcategory" list="housing-definition-subcategories" />
-                            <datalist id="housing-definition-subcategories">
+                            <InputText class="form-control" @bind-Value="definitionForm.Subcategory" list="transport-definition-subcategories" />
+                            <datalist id="transport-definition-subcategories">
                                 @foreach (var subcategory in GetSubcategorySuggestions())
                                 {
                                     <option value="@subcategory"></option>
@@ -138,14 +117,14 @@
                             <ValidationMessage For="() => definitionForm.IntervalMonths" />
                         </div>
                     </div>
-                    <button class="btn btn-primary" type="submit">@Localizer["action.addHousingDefinition"]</button>
+                    <button class="btn btn-primary" type="submit">@Localizer["action.addTransportDefinition"]</button>
                 </EditForm>
             </section>
         </div>
 
         <div class="stack-grid two-up mt-4">
             <section class="card-panel">
-                <h2>@Localizer["housing.costEntries"]</h2>
+                <h2>@Localizer["transport.costEntries"]</h2>
                 <div class="table-responsive">
                     <table class="table app-table">
                         <thead>
@@ -159,7 +138,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var expense in HousingExpenses)
+                            @foreach (var expense in TransportExpenses)
                             {
                                 <tr>
                                     <td>@expense.Description</td>
@@ -181,12 +160,11 @@
             </section>
 
             <section class="card-panel">
-                <h2>@Localizer["housing.definitions"]</h2>
+                <h2>@Localizer["transport.definitions"]</h2>
                 <div class="table-responsive">
                     <table class="table app-table">
                         <thead>
                             <tr>
-                                <th>@Localizer["field.description"]</th>
                                 <th>@Localizer["field.subcategory"]</th>
                                 <th>@Localizer["field.amount"]</th>
                                 <th>@Localizer["field.interval"]</th>
@@ -196,11 +174,10 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var definition in HousingDefinitions)
+                            @foreach (var definition in TransportDefinitions)
                             {
                                 <tr>
-                                    <td>@definition.Description</td>
-                                    <td>@definition.Subcategory</td>
+                                    <td>@GetDefinitionDisplay(definition)</td>
                                     <td>@AppState.FormatCurrency(definition.Amount)</td>
                                     <td>@GetIntervalLabel(definition.IntervalMonths)</td>
                                     <td>@GetMonthYearLabel(definition.StartYear, definition.StartMonth)</td>
@@ -220,35 +197,156 @@
         </div>
     </MudTabPanel>
 
-    <MudTabPanel Text="@Localizer["housing.loansTab"]" Icon="@Icons.Material.Filled.AccountBalance">
+    <MudTabPanel Text="@Localizer["transport.vehiclesTab"]" Icon="@Icons.Material.Filled.TimeToLeave">
         <section class="card-panel">
-            <h2>@Localizer["housing.createLoan"]</h2>
-            <EditForm EditContext="loanEditContext" OnValidSubmit="HandleAddLoanAsync">
+            <h2>@Localizer["transport.addVehicle"]</h2>
+            <EditForm EditContext="vehicleEditContext" OnValidSubmit="HandleAddVehicleAsync">
                 <DataAnnotationsValidator />
                 <ValidationSummary />
                 <div class="form-grid">
                     <div>
                         <label class="form-label">@Localizer["field.name"]</label>
-                        <InputText class="form-control" @bind-Value="loanForm.Name" />
-                        <ValidationMessage For="() => loanForm.Name" />
+                        <InputText class="form-control" @bind-Value="vehicleForm.Name" />
+                        <ValidationMessage For="() => vehicleForm.Name" />
                     </div>
                     <div>
-                        <label class="form-label">@Localizer["housing.lender"]</label>
+                        <label class="form-label">@Localizer["transport.modelYear"]</label>
+                        <InputNumber class="form-control" @bind-Value="vehicleForm.ModelYear" />
+                        <ValidationMessage For="() => vehicleForm.ModelYear" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["transport.mileage"]</label>
+                        <InputNumber class="form-control" @bind-Value="vehicleForm.Mileage" />
+                        <ValidationMessage For="() => vehicleForm.Mileage" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["transport.fuelType"]</label>
+                        <InputSelect class="form-select" @bind-Value="vehicleForm.FuelType">
+                            @foreach (var option in FuelTypeOptions)
+                            {
+                                <option value="@option.Value">@Localizer[option.LabelKey]</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["transport.vehicleType"]</label>
+                        <InputSelect class="form-select" @bind-Value="vehicleForm.VehicleType">
+                            @foreach (var option in VehicleTypeOptions)
+                            {
+                                <option value="@option.Value">@Localizer[option.LabelKey]</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["transport.ownershipType"]</label>
+                        <InputSelect class="form-select" @bind-Value="vehicleForm.OwnershipType">
+                            @foreach (var option in OwnershipTypeOptions)
+                            {
+                                <option value="@option.Value">@Localizer[option.LabelKey]</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    @if (vehicleForm.OwnershipType == VehicleOwnershipType.Private)
+                    {
+                        <div>
+                            <label class="form-label">@Localizer["transport.purchasePrice"]</label>
+                            <InputNumber class="form-control" @bind-Value="vehicleForm.PurchasePrice" />
+                            <ValidationMessage For="() => vehicleForm.PurchasePrice" />
+                        </div>
+                        <div>
+                            <label class="form-label">@Localizer["transport.estimatedSaleValue"]</label>
+                            <InputNumber class="form-control" @bind-Value="vehicleForm.EstimatedSaleValue" />
+                            <ValidationMessage For="() => vehicleForm.EstimatedSaleValue" />
+                        </div>
+                    }
+                </div>
+                <button class="btn btn-primary" type="submit">@Localizer["transport.addVehicle"]</button>
+            </EditForm>
+        </section>
+
+        <section class="card-panel mt-4">
+            <h2>@Localizer["transport.vehiclesTab"]</h2>
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["field.name"]</th>
+                            <th>@Localizer["transport.modelYear"]</th>
+                            <th>@Localizer["transport.mileage"]</th>
+                            <th>@Localizer["transport.fuelType"]</th>
+                            <th>@Localizer["transport.vehicleType"]</th>
+                            <th>@Localizer["transport.ownershipType"]</th>
+                            <th>@Localizer["field.actions"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!TransportVehicles.Any())
+                        {
+                            <tr>
+                                <td colspan="7" class="empty-state">@Localizer["transport.noVehicles"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var vehicle in TransportVehicles)
+                            {
+                                <tr>
+                                    <td>@vehicle.Name</td>
+                                    <td>@vehicle.ModelYear</td>
+                                    <td>@vehicle.Mileage</td>
+                                    <td>@Localizer[$"transport.fuelType.{vehicle.FuelType}"]</td>
+                                    <td>@Localizer[$"transport.vehicleType.{vehicle.VehicleType}"]</td>
+                                    <td>@Localizer[$"transport.ownershipType.{vehicle.OwnershipType}"]</td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => HandleDeleteVehicleAsync(vehicle))" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["transport.loansTab"]" Icon="@Icons.Material.Filled.AccountBalance">
+        <section class="card-panel">
+            <h2>@Localizer["transport.createLoan"]</h2>
+            <EditForm EditContext="loanEditContext" OnValidSubmit="HandleAddLoanAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                    <div class="form-grid">
+                    <div>
+                        <label class="form-label">@Localizer["transport.vehicle"]</label>
+                        <InputSelect class="form-select" @bind-Value="loanForm.VehicleId">
+                            <option value="">@Localizer["transport.selectVehicle"]</option>
+                            @foreach (var vehicle in TransportVehicles)
+                            {
+                                <option value="@vehicle.Id">@vehicle.Name</option>
+                            }
+                        </InputSelect>
+                        <ValidationMessage For="() => loanForm.VehicleId" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["transport.lender"]</label>
                         <InputText class="form-control" @bind-Value="loanForm.Lender" />
                         <ValidationMessage For="() => loanForm.Lender" />
                     </div>
                     <div>
-                        <label class="form-label">@Localizer["housing.loanStartDate"]</label>
+                        <label class="form-label">@Localizer["transport.loanStartDate"]</label>
                         <InputDate class="form-control" @bind-Value="loanForm.LoanStartDate" />
                         <ValidationMessage For="() => loanForm.LoanStartDate" />
                     </div>
                     <div>
-                        <label class="form-label">@Localizer["housing.initialLoanAmount"]</label>
+                        <label class="form-label">@Localizer["transport.initialLoanAmount"]</label>
                         <InputNumber class="form-control" @bind-Value="loanForm.InitialLoanAmount" />
                         <ValidationMessage For="() => loanForm.InitialLoanAmount" />
                     </div>
                     <div>
-                        <label class="form-label">@Localizer["housing.remainingDebt"]</label>
+                        <label class="form-label">@Localizer["transport.remainingDebt"]</label>
                         <InputNumber class="form-control" @bind-Value="loanForm.RemainingDebt" />
                         <ValidationMessage For="() => loanForm.RemainingDebt" />
                     </div>
@@ -257,39 +355,39 @@
             </EditForm>
         </section>
 
-        @if (!HousingLoans.Any())
+        @if (!TransportLoans.Any())
         {
             <section class="card-panel mt-4">
-                <p class="empty-state mb-0">@Localizer["housing.noLoans"]</p>
+                <p class="empty-state mb-0">@Localizer["transport.noLoans"]</p>
             </section>
         }
         else
         {
-            @foreach (var loan in HousingLoans)
+            @foreach (var loan in TransportLoans)
             {
                 <section class="card-panel mt-4">
                     <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                         <div>
-                            <h2>@loan.Name</h2>
+                            <h2>@loan.Lender</h2>
                             <div class="form-grid">
                                 <div>
-                                    <label class="form-label">@Localizer["housing.lender"]</label>
-                                    <div>@loan.Lender</div>
+                                    <label class="form-label">@Localizer["transport.vehicle"]</label>
+                                    <div>@GetVehicleName(loan.VehicleId)</div>
                                 </div>
                                 <div>
-                                    <label class="form-label">@Localizer["housing.loanStartDate"]</label>
+                                    <label class="form-label">@Localizer["transport.loanStartDate"]</label>
                                     <div>@FormatDate(loan.LoanStartDate)</div>
                                 </div>
                                 <div>
-                                    <label class="form-label">@Localizer["housing.initialLoanAmount"]</label>
+                                    <label class="form-label">@Localizer["transport.initialLoanAmount"]</label>
                                     <div>@AppState.FormatCurrency(loan.InitialLoanAmount)</div>
                                 </div>
                                 <div>
-                                    <label class="form-label">@Localizer["housing.remainingDebt"]</label>
+                                    <label class="form-label">@Localizer["transport.remainingDebt"]</label>
                                     <div>@AppState.FormatCurrency(loan.RemainingDebt)</div>
                                 </div>
                                 <div>
-                                    <label class="form-label">@Localizer["housing.currentAmortization"]</label>
+                                    <label class="form-label">@Localizer["transport.currentAmortization"]</label>
                                     <div>@AppState.FormatCurrency(loan.CurrentAmortization)</div>
                                 </div>
                             </div>
@@ -302,7 +400,7 @@
 
                     <div class="stack-grid two-up mt-4">
                         <section class="card-panel">
-                            <h3>@Localizer["housing.interestBindingPeriods"]</h3>
+                            <h3>@Localizer["transport.interestBindingPeriods"]</h3>
                             <EditForm EditContext="GetBindingPeriodEditContext(loan.Id)" OnValidSubmit="@(() => HandleAddBindingPeriodAsync(loan.Id))">
                                 <DataAnnotationsValidator />
                                 <ValidationSummary />
@@ -318,12 +416,12 @@
                                         <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).EndDate)" />
                                     </div>
                                     <div>
-                                        <label class="form-label">@Localizer["housing.interestRate"]</label>
+                                        <label class="form-label">@Localizer["transport.interestRate"]</label>
                                         <InputNumber class="form-control" @bind-Value="GetBindingPeriodForm(loan.Id).InterestRate" />
                                         <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).InterestRate)" />
                                     </div>
                                 </div>
-                                <button class="btn btn-primary" type="submit">@Localizer["housing.createBindingPeriod"]</button>
+                                <button class="btn btn-primary" type="submit">@Localizer["transport.createBindingPeriod"]</button>
                             </EditForm>
 
                             <div class="table-responsive mt-4">
@@ -332,7 +430,7 @@
                                         <tr>
                                             <th>@Localizer["field.start"]</th>
                                             <th>@Localizer["field.end"]</th>
-                                            <th>@Localizer["housing.interestRate"]</th>
+                                            <th>@Localizer["transport.interestRate"]</th>
                                             <th>@Localizer["field.actions"]</th>
                                         </tr>
                                     </thead>
@@ -340,7 +438,7 @@
                                         @if (!GetLoanInterestBindingPeriods(loan.Id).Any())
                                         {
                                             <tr>
-                                                <td colspan="4" class="empty-state">@Localizer["housing.noBindingPeriods"]</td>
+                                                <td colspan="4" class="empty-state">@Localizer["transport.noBindingPeriods"]</td>
                                             </tr>
                                         }
                                         else
@@ -352,10 +450,6 @@
                                                     <td>@FormatDate(period.EndDate)</td>
                                                     <td>@FormatInterestRate(period.InterestRate)</td>
                                                     <td>
-                                                        <button class="btn btn-outline-primary btn-sm me-2"
-                                                                @onclick="() => HandleUpdateBindingPeriodAsync(period)">
-                                                            @Localizer["action.update"]
-                                                        </button>
                                                         <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                                                        Color="Color.Error"
                                                                        Size="Size.Small"
@@ -370,31 +464,37 @@
                         </section>
 
                         <section class="card-panel">
-                            <h3>@Localizer["housing.amortization"]</h3>
-                            <EditForm EditContext="GetAmortizationPlanEditContext(loan.Id)" OnValidSubmit="@(() => HandleAddAmortizationAsync(loan.Id))">
+                            <h3>@Localizer["transport.amortizationPlans"]</h3>
+                            <EditForm EditContext="GetAmortizationPlanEditContext(loan.Id)" OnValidSubmit="@(() => HandleAddAmortizationPlanAsync(loan.Id))">
                                 <DataAnnotationsValidator />
                                 <ValidationSummary />
                                 <div class="form-grid">
                                     <div>
-                                        <label class="form-label">@Localizer["housing.amortizationMonth"]</label>
-                                        <InputDate class="form-control" @bind-Value="GetAmortizationPlanForm(loan.Id).Month" />
-                                        <ValidationMessage For="@(() => GetAmortizationPlanForm(loan.Id).Month)" />
+                                        <label class="form-label">@Localizer["field.start"]</label>
+                                        <InputDate class="form-control" @bind-Value="GetAmortizationPlanForm(loan.Id).StartDate" />
+                                        <ValidationMessage For="@(() => GetAmortizationPlanForm(loan.Id).StartDate)" />
                                     </div>
                                     <div>
-                                        <label class="form-label">@Localizer["housing.monthlyAmortizationAmount"]</label>
+                                        <label class="form-label">@Localizer["field.end"]</label>
+                                        <InputDate class="form-control" @bind-Value="GetAmortizationPlanForm(loan.Id).EndDate" />
+                                        <ValidationMessage For="@(() => GetAmortizationPlanForm(loan.Id).EndDate)" />
+                                    </div>
+                                    <div>
+                                        <label class="form-label">@Localizer["transport.monthlyAmortizationAmount"]</label>
                                         <InputNumber class="form-control" @bind-Value="GetAmortizationPlanForm(loan.Id).MonthlyAmortizationAmount" />
                                         <ValidationMessage For="@(() => GetAmortizationPlanForm(loan.Id).MonthlyAmortizationAmount)" />
                                     </div>
                                 </div>
-                                <button class="btn btn-primary" type="submit">@Localizer["housing.amortize"]</button>
+                                <button class="btn btn-primary" type="submit">@Localizer["transport.createAmortizationPlan"]</button>
                             </EditForm>
 
                             <div class="table-responsive mt-4">
                                 <table class="table app-table">
                                     <thead>
                                         <tr>
-                                            <th>@Localizer["housing.amortizationMonth"]</th>
-                                            <th>@Localizer["housing.monthlyAmortizationAmount"]</th>
+                                            <th>@Localizer["field.start"]</th>
+                                            <th>@Localizer["field.end"]</th>
+                                            <th>@Localizer["transport.monthlyAmortizationAmount"]</th>
                                             <th>@Localizer["field.actions"]</th>
                                         </tr>
                                     </thead>
@@ -402,7 +502,7 @@
                                         @if (!GetLoanAmortizationPlans(loan.Id).Any())
                                         {
                                             <tr>
-                                                <td colspan="3" class="empty-state">@Localizer["housing.noAmortizationPlans"]</td>
+                                                <td colspan="4" class="empty-state">@Localizer["transport.noAmortizationPlans"]</td>
                                             </tr>
                                         }
                                         else
@@ -411,6 +511,7 @@
                                             {
                                                 <tr>
                                                     <td>@FormatDate(plan.StartDate)</td>
+                                                    <td>@FormatDate(plan.EndDate)</td>
                                                     <td>@AppState.FormatCurrency(plan.MonthlyAmortizationAmount)</td>
                                                     <td>
                                                         <MudIconButton Icon="@Icons.Material.Filled.Delete"
@@ -430,28 +531,129 @@
             }
         }
     </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["transport.leasingTab"]" Icon="@Icons.Material.Filled.Description">
+        <section class="card-panel">
+            <h2>@Localizer["transport.createLeasingContract"]</h2>
+            <EditForm EditContext="leasingEditContext" OnValidSubmit="HandleAddLeasingContractAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <div class="form-grid">
+                    <div>
+                        <label class="form-label">@Localizer["transport.vehicle"]</label>
+                        <InputSelect class="form-select" @bind-Value="leasingForm.VehicleId">
+                            <option value="">@Localizer["transport.selectVehicle"]</option>
+                            @foreach (var vehicle in TransportVehicles)
+                            {
+                                <option value="@vehicle.Id">@vehicle.Name</option>
+                            }
+                        </InputSelect>
+                        <ValidationMessage For="() => leasingForm.VehicleId" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.start"]</label>
+                        <InputDate class="form-control" @bind-Value="leasingForm.StartDate" />
+                        <ValidationMessage For="() => leasingForm.StartDate" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.end"]</label>
+                        <InputDate class="form-control" @bind-Value="leasingForm.EndDate" />
+                        <ValidationMessage For="() => leasingForm.EndDate" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["transport.monthlyCost"]</label>
+                        <InputNumber class="form-control" @bind-Value="leasingForm.MonthlyCost" />
+                        <ValidationMessage For="() => leasingForm.MonthlyCost" />
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">@Localizer["transport.createLeasingContract"]</button>
+            </EditForm>
+        </section>
+
+        <section class="card-panel mt-4">
+            <h2>@Localizer["transport.leasingContracts"]</h2>
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["transport.vehicle"]</th>
+                            <th>@Localizer["field.start"]</th>
+                            <th>@Localizer["field.end"]</th>
+                            <th>@Localizer["transport.monthlyCost"]</th>
+                            <th>@Localizer["field.actions"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!TransportLeasingContracts.Any())
+                        {
+                            <tr>
+                                <td colspan="5" class="empty-state">@Localizer["transport.noLeasingContracts"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var contract in TransportLeasingContracts)
+                            {
+                                <tr>
+                                    <td>@GetVehicleName(contract.VehicleId)</td>
+                                    <td>@FormatDate(contract.StartDate)</td>
+                                    <td>@FormatDate(contract.EndDate)</td>
+                                    <td>@AppState.FormatCurrency(contract.MonthlyCost)</td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => HandleDeleteLeasingContractAsync(contract))" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+
 </MudTabs>
 
 @code {
-    private HomeResidenceFormModel homeResidenceForm = new();
-    private HousingCostFormModel costForm = new();
-    private HousingDefinitionFormModel definitionForm = new();
-    private HousingLoanFormModel loanForm = new();
+    private TransportVehicleFormModel vehicleForm = new();
+    private TransportCostFormModel costForm = new();
+    private TransportDefinitionFormModel definitionForm = new();
+    private TransportLoanFormModel loanForm = new();
+    private TransportLeasingFormModel leasingForm = new();
     private readonly Dictionary<Guid, LoanBindingPeriodFormModel> bindingPeriodForms = [];
-    private readonly Dictionary<Guid, LoanAmortizationPlanFormModel> amortizationPlanForms = [];
     private readonly Dictionary<Guid, EditContext> bindingPeriodEditContexts = [];
+    private readonly Dictionary<Guid, LoanAmortizationPlanFormModel> amortizationPlanForms = [];
     private readonly Dictionary<Guid, EditContext> amortizationPlanEditContexts = [];
-    private EditContext homeResidenceEditContext = default!;
     private EditContext costEditContext = default!;
     private EditContext definitionEditContext = default!;
     private EditContext loanEditContext = default!;
+    private EditContext leasingEditContext = default!;
+    private EditContext vehicleEditContext = default!;
     private string? statusMessage;
 
-    private static IReadOnlyList<ResidenceTypeOption> ResidenceTypeOptions { get; } =
+    private static IReadOnlyList<Option<VehicleFuelType>> FuelTypeOptions { get; } =
     [
-        new(HomeResidenceType.RentalApartment, "housing.residenceType.rentalApartment"),
-        new(HomeResidenceType.Condominium, "housing.residenceType.condominium"),
-        new(HomeResidenceType.House, "housing.residenceType.house")
+        new(VehicleFuelType.Petrol, "transport.fuelType.Petrol"),
+        new(VehicleFuelType.Diesel, "transport.fuelType.Diesel"),
+        new(VehicleFuelType.Hybrid, "transport.fuelType.Hybrid"),
+        new(VehicleFuelType.Electric, "transport.fuelType.Electric"),
+        new(VehicleFuelType.Gas, "transport.fuelType.Gas")
+    ];
+
+    private static IReadOnlyList<Option<TransportVehicleType>> VehicleTypeOptions { get; } =
+    [
+        new(TransportVehicleType.Car, "transport.vehicleType.Car"),
+        new(TransportVehicleType.Truck, "transport.vehicleType.Truck"),
+        new(TransportVehicleType.Other, "transport.vehicleType.Other")
+    ];
+
+    private static IReadOnlyList<Option<VehicleOwnershipType>> OwnershipTypeOptions { get; } =
+    [
+        new(VehicleOwnershipType.Private, "transport.ownershipType.Private"),
+        new(VehicleOwnershipType.Leasing, "transport.ownershipType.Leasing"),
+        new(VehicleOwnershipType.CompanyCar, "transport.ownershipType.CompanyCar")
     ];
 
     private static IReadOnlyList<DefinitionIntervalOption> DefinitionIntervals { get; } =
@@ -462,29 +664,37 @@
         new(12, "interval.yearly")
     ];
 
-    private IEnumerable<ExpenseEntry> HousingExpenses =>
+    private IEnumerable<ExpenseEntry> TransportExpenses =>
         AppState.Data.ExpenseRecords
-            .Where(record => record.Category == ExpenseCategory.Housing)
+            .Where(record => record.Category == ExpenseCategory.Transport)
             .OrderByDescending(record => record.Year)
             .ThenByDescending(record => record.Month)
             .ThenBy(record => record.Subcategory)
             .ThenBy(record => record.Description);
 
-    private IEnumerable<HousingCostDefinition> HousingDefinitions =>
-        AppState.Data.HousingDefinitions
+    private IEnumerable<TransportCostDefinition> TransportDefinitions =>
+        AppState.Data.TransportDefinitions
             .OrderBy(record => record.Subcategory)
             .ThenBy(record => record.StartYear)
             .ThenBy(record => record.StartMonth);
 
-    private IReadOnlyList<HousingLoan> HousingLoans =>
-        AppState.Data.HousingLoans
-            .OrderBy(loan => loan.Name)
-            .ThenBy(loan => loan.Lender)
+    private IReadOnlyList<TransportLoan> TransportLoans =>
+        AppState.Data.TransportLoans
+            .OrderBy(loan => loan.Lender)
             .ThenBy(loan => loan.LoanStartDate)
             .ToList();
 
-    private bool ShowsOwnedResidenceFields =>
-        homeResidenceForm.ResidenceType is HomeResidenceType.Condominium or HomeResidenceType.House;
+    private IReadOnlyList<TransportVehicle> TransportVehicles =>
+        AppState.Data.TransportVehicles
+            .OrderBy(vehicle => vehicle.Name)
+            .ThenBy(vehicle => vehicle.ModelYear)
+            .ToList();
+
+    private IReadOnlyList<TransportLeasingContract> TransportLeasingContracts =>
+        AppState.Data.TransportLeasingContracts
+            .OrderBy(contract => contract.StartDate)
+            .ThenBy(contract => contract.EndDate)
+            .ToList();
 
     protected override void OnInitialized()
     {
@@ -500,13 +710,14 @@
             costForm.Amount,
             date.Year,
             date.Month,
-            ExpenseCategory.Housing,
+            ExpenseCategory.Transport,
             costForm.Subcategory,
-            costForm.Description);
+            costForm.Description,
+            transportVehicleId: costForm.VehicleId);
 
-        costForm = new HousingCostFormModel();
+        costForm = new TransportCostFormModel();
         ResetForms();
-        statusMessage = Localizer["housing.costAdded"];
+        statusMessage = Localizer["transport.costAdded"];
     }
 
     private async Task HandleAddDefinitionAsync()
@@ -519,7 +730,7 @@
             return;
         }
 
-        await AppState.AddHousingDefinitionAsync(
+        await AppState.AddTransportDefinitionAsync(
             definitionForm.Amount,
             definitionForm.IntervalMonths,
             startDate.Year,
@@ -527,38 +738,25 @@
             endDate.Year,
             endDate.Month,
             definitionForm.Subcategory,
-            definitionForm.Description);
+            definitionForm.VehicleId!.Value);
 
-        definitionForm = new HousingDefinitionFormModel();
+        definitionForm = new TransportDefinitionFormModel();
         ResetForms();
-        statusMessage = Localizer["housing.definitionAdded"];
+        statusMessage = Localizer["transport.definitionAdded"];
     }
 
     private async Task HandleAddLoanAsync()
     {
-        await AppState.AddHousingLoanAsync(
-            loanForm.Name,
+        await AppState.AddTransportLoanAsync(
+            loanForm.VehicleId!.Value,
             loanForm.Lender,
             DateOnly.FromDateTime(loanForm.LoanStartDate!.Value),
             loanForm.InitialLoanAmount,
             loanForm.RemainingDebt);
 
-        loanForm = new HousingLoanFormModel();
+        loanForm = new TransportLoanFormModel();
         ResetForms();
-        statusMessage = Localizer["housing.loanAdded"];
-    }
-
-    private async Task HandleSaveHomeResidenceAsync()
-    {
-        await AppState.SaveHomeResidenceAsync(
-            homeResidenceForm.ResidenceType,
-            homeResidenceForm.PurchaseYear,
-            homeResidenceForm.PurchasePrice,
-            homeResidenceForm.CurrentMarketValue);
-
-        homeResidenceForm = CreateHomeResidenceForm();
-        homeResidenceEditContext = new EditContext(homeResidenceForm);
-        statusMessage = Localizer["housing.homeResidenceSaved"];
+        statusMessage = Localizer["transport.loanAdded"];
     }
 
     private async Task HandleAddBindingPeriodAsync(Guid loanId)
@@ -578,7 +776,7 @@
             await AppState.AddLoanInterestBindingPeriodAsync(loanId, startDate, endDate, form.InterestRate);
             bindingPeriodForms[loanId] = CreateBindingPeriodForm();
             bindingPeriodEditContexts[loanId] = new EditContext(bindingPeriodForms[loanId]);
-            statusMessage = Localizer["housing.bindingPeriodAdded"];
+            statusMessage = Localizer["transport.bindingPeriodAdded"];
         }
         catch (InvalidOperationException)
         {
@@ -586,17 +784,24 @@
         }
     }
 
-    private async Task HandleAddAmortizationAsync(Guid loanId)
+    private async Task HandleAddAmortizationPlanAsync(Guid loanId)
     {
         var form = GetAmortizationPlanForm(loanId);
-        var month = DateOnly.FromDateTime(form.Month!.Value);
+        var startDate = DateOnly.FromDateTime(form.StartDate!.Value);
+        var endDate = DateOnly.FromDateTime(form.EndDate!.Value);
+
+        if (endDate < startDate)
+        {
+            statusMessage = Localizer["validation.endDateOnOrAfterStartDate"];
+            return;
+        }
 
         try
         {
-            await AppState.AddHousingLoanAmortizationAsync(loanId, month, form.MonthlyAmortizationAmount);
-            amortizationPlanForms[loanId] = CreateAmortizationPlanForm(loanId);
+            await AppState.AddLoanAmortizationPlanAsync(loanId, startDate, endDate, form.MonthlyAmortizationAmount);
+            amortizationPlanForms[loanId] = CreateAmortizationPlanForm();
             amortizationPlanEditContexts[loanId] = new EditContext(amortizationPlanForms[loanId]);
-            statusMessage = Localizer["housing.amortizationPlanAdded"];
+            statusMessage = Localizer["transport.amortizationPlanAdded"];
         }
         catch (InvalidOperationException)
         {
@@ -604,10 +809,44 @@
         }
     }
 
-    private async Task HandleUpdateBindingPeriodAsync(LoanInterestBindingPeriod period)
+    private async Task HandleAddLeasingContractAsync()
     {
-        await AppState.UpdateHousingLoanInterestBindingPeriodAsync(period.Id);
-        statusMessage = Localizer["housing.bindingPeriodUpdated"];
+        var startDate = DateOnly.FromDateTime(leasingForm.StartDate!.Value);
+        var endDate = DateOnly.FromDateTime(leasingForm.EndDate!.Value);
+        if (endDate < startDate)
+        {
+            statusMessage = Localizer["validation.endDateOnOrAfterStartDate"];
+            return;
+        }
+
+        try
+        {
+            await AppState.AddTransportLeasingContractAsync(leasingForm.VehicleId!.Value, startDate, endDate, leasingForm.MonthlyCost);
+            leasingForm = new TransportLeasingFormModel();
+            ResetForms();
+            statusMessage = Localizer["transport.leasingContractAdded"];
+        }
+        catch (InvalidOperationException)
+        {
+            statusMessage = Localizer["validation.transportLeasingOverlap"];
+        }
+    }
+
+    private async Task HandleAddVehicleAsync()
+    {
+        await AppState.AddTransportVehicleAsync(
+            vehicleForm.Name,
+            vehicleForm.ModelYear,
+            vehicleForm.Mileage,
+            vehicleForm.FuelType,
+            vehicleForm.VehicleType,
+            vehicleForm.OwnershipType,
+            vehicleForm.PurchasePrice,
+            vehicleForm.EstimatedSaleValue);
+
+        vehicleForm = new TransportVehicleFormModel();
+        ResetForms();
+        statusMessage = Localizer["transport.vehicleAdded"];
     }
 
     private async Task HandleDeleteExpenseAsync(ExpenseEntry expense)
@@ -615,7 +854,7 @@
         var parameters = new DialogParameters<ConfirmDialog>
         {
             { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
-            { dialog => dialog.Message, string.Format(Localizer["housing.deleteCostMessage"], expense.Description) },
+            { dialog => dialog.Message, string.Format(Localizer["transport.deleteCostMessage"], expense.Description) },
             { dialog => dialog.ConfirmText, Localizer["action.delete"] },
             { dialog => dialog.CancelText, Localizer["action.cancel"] }
         };
@@ -633,15 +872,15 @@
         }
 
         await AppState.RemoveExpenseAsync(expense.Id);
-        statusMessage = Localizer["housing.costDeleted"];
+        statusMessage = Localizer["transport.costDeleted"];
     }
 
-    private async Task HandleDeleteDefinitionAsync(HousingCostDefinition definition)
+    private async Task HandleDeleteDefinitionAsync(TransportCostDefinition definition)
     {
         var parameters = new DialogParameters<ConfirmDialog>
         {
             { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
-            { dialog => dialog.Message, string.Format(Localizer["housing.deleteDefinitionMessage"], definition.Subcategory) },
+            { dialog => dialog.Message, string.Format(Localizer["transport.deleteDefinitionMessage"], definition.Subcategory) },
             { dialog => dialog.ConfirmText, Localizer["action.delete"] },
             { dialog => dialog.CancelText, Localizer["action.cancel"] }
         };
@@ -658,16 +897,16 @@
             return;
         }
 
-        await AppState.RemoveHousingDefinitionAsync(definition.Id);
-        statusMessage = Localizer["housing.definitionDeleted"];
+        await AppState.RemoveTransportDefinitionAsync(definition.Id);
+        statusMessage = Localizer["transport.definitionDeleted"];
     }
 
-    private async Task HandleDeleteLoanAsync(HousingLoan loan)
+    private async Task HandleDeleteLoanAsync(TransportLoan loan)
     {
         var parameters = new DialogParameters<ConfirmDialog>
         {
             { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
-            { dialog => dialog.Message, string.Format(Localizer["housing.deleteLoanMessage"], loan.Lender) },
+            { dialog => dialog.Message, string.Format(Localizer["transport.deleteLoanMessage"], loan.Lender) },
             { dialog => dialog.ConfirmText, Localizer["action.delete"] },
             { dialog => dialog.CancelText, Localizer["action.cancel"] }
         };
@@ -684,12 +923,12 @@
             return;
         }
 
-        await AppState.RemoveHousingLoanAsync(loan.Id);
+        await AppState.RemoveTransportLoanAsync(loan.Id);
         bindingPeriodForms.Remove(loan.Id);
         bindingPeriodEditContexts.Remove(loan.Id);
         amortizationPlanForms.Remove(loan.Id);
         amortizationPlanEditContexts.Remove(loan.Id);
-        statusMessage = Localizer["housing.loanDeleted"];
+        statusMessage = Localizer["transport.loanDeleted"];
     }
 
     private async Task HandleDeleteBindingPeriodAsync(LoanInterestBindingPeriod period)
@@ -697,7 +936,7 @@
         var parameters = new DialogParameters<ConfirmDialog>
         {
             { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
-            { dialog => dialog.Message, string.Format(Localizer["housing.deleteBindingPeriodMessage"], FormatDate(period.StartDate), FormatDate(period.EndDate)) },
+            { dialog => dialog.Message, string.Format(Localizer["transport.deleteBindingPeriodMessage"], FormatDate(period.StartDate), FormatDate(period.EndDate)) },
             { dialog => dialog.ConfirmText, Localizer["action.delete"] },
             { dialog => dialog.CancelText, Localizer["action.cancel"] }
         };
@@ -715,7 +954,7 @@
         }
 
         await AppState.RemoveLoanInterestBindingPeriodAsync(period.Id);
-        statusMessage = Localizer["housing.bindingPeriodDeleted"];
+        statusMessage = Localizer["transport.bindingPeriodDeleted"];
     }
 
     private async Task HandleDeleteAmortizationPlanAsync(LoanAmortizationPlan plan)
@@ -723,7 +962,7 @@
         var parameters = new DialogParameters<ConfirmDialog>
         {
             { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
-            { dialog => dialog.Message, string.Format(Localizer["housing.deleteAmortizationPlanMessage"], FormatDate(plan.StartDate), FormatDate(plan.EndDate)) },
+            { dialog => dialog.Message, string.Format(Localizer["transport.deleteAmortizationPlanMessage"], FormatDate(plan.StartDate), FormatDate(plan.EndDate)) },
             { dialog => dialog.ConfirmText, Localizer["action.delete"] },
             { dialog => dialog.CancelText, Localizer["action.cancel"] }
         };
@@ -741,36 +980,88 @@
         }
 
         await AppState.RemoveLoanAmortizationPlanAsync(plan.Id);
-        statusMessage = Localizer["housing.amortizationPlanDeleted"];
+        statusMessage = Localizer["transport.amortizationPlanDeleted"];
+    }
+
+    private async Task HandleDeleteLeasingContractAsync(TransportLeasingContract contract)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["transport.deleteLeasingContractMessage"], FormatDate(contract.StartDate), FormatDate(contract.EndDate)) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveTransportLeasingContractAsync(contract.Id);
+        statusMessage = Localizer["transport.leasingContractDeleted"];
+    }
+
+    private async Task HandleDeleteVehicleAsync(TransportVehicle vehicle)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["transport.deleteVehicleMessage"], vehicle.Name) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        try
+        {
+            await AppState.RemoveTransportVehicleAsync(vehicle.Id);
+            statusMessage = Localizer["transport.vehicleDeleted"];
+        }
+        catch (InvalidOperationException)
+        {
+            statusMessage = Localizer["validation.transportVehicleInUse"];
+        }
     }
 
     private void ResetForms()
     {
         var today = DateTime.Today;
-
-        homeResidenceForm = CreateHomeResidenceForm();
-        costForm.Date ??= new DateTime(today.Year, today.Month, 1);
+        costForm.Date ??= today;
         definitionForm.StartDate ??= new DateTime(today.Year, today.Month, 1);
         definitionForm.EndDate ??= new DateTime(today.Year, today.Month, 1);
         definitionForm.IntervalMonths = 1;
         loanForm.LoanStartDate ??= today;
+        leasingForm.StartDate ??= new DateTime(today.Year, today.Month, 1);
+        leasingForm.EndDate ??= new DateTime(today.Year, today.Month, 1);
+        vehicleForm.ModelYear = vehicleForm.ModelYear == 0 ? today.Year : vehicleForm.ModelYear;
+        vehicleForm.FuelType = vehicleForm.FuelType == 0 ? VehicleFuelType.Petrol : vehicleForm.FuelType;
+        vehicleForm.VehicleType = vehicleForm.VehicleType == 0 ? TransportVehicleType.Car : vehicleForm.VehicleType;
+        vehicleForm.OwnershipType = vehicleForm.OwnershipType == 0 ? VehicleOwnershipType.Private : vehicleForm.OwnershipType;
 
-        homeResidenceEditContext = new EditContext(homeResidenceForm);
         costEditContext = new EditContext(costForm);
         definitionEditContext = new EditContext(definitionForm);
         loanEditContext = new EditContext(loanForm);
-    }
-
-    private HomeResidenceFormModel CreateHomeResidenceForm()
-    {
-        var residence = AppState.Data.HomeResidence;
-        return new HomeResidenceFormModel
-        {
-            ResidenceType = residence?.ResidenceType ?? HomeResidenceType.RentalApartment,
-            PurchaseYear = residence?.PurchaseYear,
-            PurchasePrice = residence?.PurchasePrice,
-            CurrentMarketValue = residence?.CurrentMarketValue
-        };
+        leasingEditContext = new EditContext(leasingForm);
+        vehicleEditContext = new EditContext(vehicleForm);
     }
 
     private LoanBindingPeriodFormModel GetBindingPeriodForm(Guid loanId)
@@ -807,7 +1098,7 @@
 
         if (!amortizationPlanForms.ContainsKey(loanId))
         {
-            amortizationPlanForms[loanId] = CreateAmortizationPlanForm(loanId);
+            amortizationPlanForms[loanId] = CreateAmortizationPlanForm();
             amortizationPlanEditContexts[loanId] = new EditContext(amortizationPlanForms[loanId]);
         }
     }
@@ -822,19 +1113,13 @@
         };
     }
 
-    private LoanAmortizationPlanFormModel CreateAmortizationPlanForm(Guid loanId)
+    private static LoanAmortizationPlanFormModel CreateAmortizationPlanForm()
     {
         var today = DateTime.Today;
-        var latestAmount = GetLoanAmortizationPlans(loanId)
-            .OrderByDescending(plan => plan.StartDate)
-            .ThenByDescending(plan => plan.EndDate)
-            .Select(plan => plan.MonthlyAmortizationAmount)
-            .FirstOrDefault();
-
         return new LoanAmortizationPlanFormModel
         {
-            Month = new DateTime(today.Year, today.Month, 1),
-            MonthlyAmortizationAmount = latestAmount
+            StartDate = new DateTime(today.Year, today.Month, 1),
+            EndDate = new DateTime(today.Year, today.Month, 1)
         };
     }
 
@@ -848,15 +1133,15 @@
     private IReadOnlyList<LoanAmortizationPlan> GetLoanAmortizationPlans(Guid loanId) =>
         AppState.Data.LoanAmortizationPlans
             .Where(plan => plan.LoanId == loanId)
-            .OrderByDescending(plan => plan.StartDate)
-            .ThenByDescending(plan => plan.EndDate)
+            .OrderBy(plan => plan.StartDate)
+            .ThenBy(plan => plan.EndDate)
             .ToList();
 
     private IReadOnlyList<string> GetSubcategorySuggestions() =>
         AppState.Data.ExpenseRecords
-            .Where(record => record.Category == ExpenseCategory.Housing && !string.IsNullOrWhiteSpace(record.Subcategory))
+            .Where(record => record.Category == ExpenseCategory.Transport && !string.IsNullOrWhiteSpace(record.Subcategory))
             .Select(record => record.Subcategory.Trim())
-            .Concat(AppState.Data.HousingDefinitions
+            .Concat(AppState.Data.TransportDefinitions
                 .Where(record => !string.IsNullOrWhiteSpace(record.Subcategory))
                 .Select(record => record.Subcategory.Trim()))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -868,7 +1153,7 @@
         var option = DefinitionIntervals.FirstOrDefault(item => item.Months == intervalMonths);
         return option is not null
             ? Localizer[option.LabelKey]
-            : string.Format(Localizer["housing.intervalFallback"], intervalMonths);
+            : string.Format(Localizer["transport.intervalFallback"], intervalMonths);
     }
 
     private string GetMonthYearLabel(int year, int month) => $"{Localizer[$"month.{month}"]} {year}";
@@ -876,6 +1161,25 @@
     private static string FormatDate(DateOnly date) => date.ToString("yyyy-MM-dd");
 
     private static string FormatInterestRate(decimal rate) => $"{rate:0.##}%";
+
+    private string GetDefinitionDisplay(TransportCostDefinition definition)
+    {
+        var vehicleName = GetVehicleName(definition.VehicleId);
+        var subcategory = AppState.GetExpenseLabelDisplay(definition.Subcategory);
+        return string.IsNullOrWhiteSpace(vehicleName)
+            ? subcategory
+            : $"{vehicleName} - {subcategory}";
+    }
+
+    private string GetVehicleName(Guid? vehicleId)
+    {
+        if (!vehicleId.HasValue)
+        {
+            return string.Empty;
+        }
+
+        return TransportVehicles.FirstOrDefault(vehicle => vehicle.Id == vehicleId.Value)?.Name ?? string.Empty;
+    }
 
     private void HandleChanged() => InvokeAsync(StateHasChanged);
 
@@ -887,23 +1191,9 @@
 
     private sealed record DefinitionIntervalOption(int Months, string LabelKey);
 
-    private sealed record ResidenceTypeOption(HomeResidenceType Type, string LabelKey);
+    private sealed record Option<TValue>(TValue Value, string LabelKey);
 
-    private sealed class HomeResidenceFormModel
-    {
-        public HomeResidenceType ResidenceType { get; set; } = HomeResidenceType.RentalApartment;
-
-        [Range(1900, 3000, ErrorMessage = "Purchase year must be between 1900 and 3000.")]
-        public int? PurchaseYear { get; set; }
-
-        [Range(typeof(decimal), "0.00", "999999999999", ErrorMessage = "Purchase price must be zero or greater.")]
-        public decimal? PurchasePrice { get; set; }
-
-        [Range(typeof(decimal), "0.00", "999999999999", ErrorMessage = "Current market value must be zero or greater.")]
-        public decimal? CurrentMarketValue { get; set; }
-    }
-
-    private sealed class HousingCostFormModel
+    private sealed class TransportCostFormModel
     {
         [Required(ErrorMessage = "Description is required.")]
         [StringLength(100, ErrorMessage = "Description must be 100 characters or fewer.")]
@@ -918,14 +1208,13 @@
         [Required(ErrorMessage = "Subcategory is required.")]
         [StringLength(60, ErrorMessage = "Subcategory must be 60 characters or fewer.")]
         public string Subcategory { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Vehicle is required.")]
+        public Guid? VehicleId { get; set; }
     }
 
-    private sealed class HousingDefinitionFormModel
+    private sealed class TransportDefinitionFormModel
     {
-        [Required(ErrorMessage = "Description is required.")]
-        [StringLength(100, ErrorMessage = "Description must be 100 characters or fewer.")]
-        public string Description { get; set; } = string.Empty;
-
         [Required(ErrorMessage = "Subcategory is required.")]
         [StringLength(60, ErrorMessage = "Subcategory must be 60 characters or fewer.")]
         public string Subcategory { get; set; } = string.Empty;
@@ -941,13 +1230,15 @@
 
         [Range(1, 120, ErrorMessage = "Interval must be between 1 and 120 months.")]
         public int IntervalMonths { get; set; }
+
+        [Required(ErrorMessage = "Vehicle is required.")]
+        public Guid? VehicleId { get; set; }
     }
 
-    private sealed class HousingLoanFormModel
+    private sealed class TransportLoanFormModel
     {
-        [Required(ErrorMessage = "Name is required.")]
-        [StringLength(100, ErrorMessage = "Name must be 100 characters or fewer.")]
-        public string Name { get; set; } = string.Empty;
+        [Required(ErrorMessage = "Vehicle is required.")]
+        public Guid? VehicleId { get; set; }
 
         [Required(ErrorMessage = "Lender is required.")]
         [StringLength(100, ErrorMessage = "Lender must be 100 characters or fewer.")]
@@ -977,11 +1268,54 @@
 
     private sealed class LoanAmortizationPlanFormModel
     {
-        [Required(ErrorMessage = "Month is required.")]
-        public DateTime? Month { get; set; }
+        [Required(ErrorMessage = "Start date is required.")]
+        public DateTime? StartDate { get; set; }
+
+        [Required(ErrorMessage = "End date is required.")]
+        public DateTime? EndDate { get; set; }
 
         [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Monthly amortization amount must be greater than zero.")]
         public decimal MonthlyAmortizationAmount { get; set; }
+    }
+
+    private sealed class TransportLeasingFormModel
+    {
+        [Required(ErrorMessage = "Vehicle is required.")]
+        public Guid? VehicleId { get; set; }
+
+        [Required(ErrorMessage = "Start date is required.")]
+        public DateTime? StartDate { get; set; }
+
+        [Required(ErrorMessage = "End date is required.")]
+        public DateTime? EndDate { get; set; }
+
+        [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Monthly cost must be greater than zero.")]
+        public decimal MonthlyCost { get; set; }
+    }
+
+    private sealed class TransportVehicleFormModel
+    {
+        [Required(ErrorMessage = "Name is required.")]
+        [StringLength(100, ErrorMessage = "Name must be 100 characters or fewer.")]
+        public string Name { get; set; } = string.Empty;
+
+        [Range(1900, 3000, ErrorMessage = "Model year must be between 1900 and 3000.")]
+        public int ModelYear { get; set; }
+
+        [Range(0, int.MaxValue, ErrorMessage = "Mileage must be zero or greater.")]
+        public int Mileage { get; set; }
+
+        public VehicleFuelType FuelType { get; set; } = VehicleFuelType.Petrol;
+
+        public TransportVehicleType VehicleType { get; set; } = TransportVehicleType.Car;
+
+        public VehicleOwnershipType OwnershipType { get; set; } = VehicleOwnershipType.Private;
+
+        [Range(typeof(decimal), "0.00", "999999999", ErrorMessage = "Purchase price must be zero or greater.")]
+        public decimal? PurchasePrice { get; set; }
+
+        [Range(typeof(decimal), "0.00", "999999999", ErrorMessage = "Estimated sale value must be zero or greater.")]
+        public decimal? EstimatedSaleValue { get; set; }
     }
 
 }

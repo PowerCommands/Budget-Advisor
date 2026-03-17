@@ -1,0 +1,91 @@
+@using System.ComponentModel.DataAnnotations
+@inject LocalizationService Localizer
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.h6">@Localizer[GetTitleKey()]</MudText>
+
+        <EditForm EditContext="editContext" OnValidSubmit="HandleSubmit">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-grid mt-3">
+                @if (AccountType == SavingsAccountType.Bank)
+                {
+                    <div>
+                        <label class="form-label">@Localizer["savings.bankName"]</label>
+                        <InputText class="form-control" @bind-Value="model.ProviderName" />
+                        <ValidationMessage For="() => model.ProviderName" />
+                    </div>
+                }
+                <div>
+                    <label class="form-label">@Localizer["savings.accountName"]</label>
+                    <InputText class="form-control" @bind-Value="model.AccountName" />
+                    <ValidationMessage For="() => model.AccountName" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["savings.openingBalance"]</label>
+                    <InputNumber class="form-control" @bind-Value="model.OpeningBalance" />
+                    <ValidationMessage For="() => model.OpeningBalance" />
+                </div>
+            </div>
+        </EditForm>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">@Localizer["action.cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Submit">@Localizer["action.create"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public SavingsAccountType AccountType { get; set; }
+
+    private CreateSavingsAccountDialogModel model = new();
+    private EditContext editContext = default!;
+
+    protected override void OnInitialized()
+    {
+        model.AccountType = AccountType;
+        editContext = new EditContext(model);
+    }
+
+    private string GetTitleKey() => AccountType switch
+    {
+        SavingsAccountType.Bank => "savings.createBankAccount",
+        SavingsAccountType.Fund => "savings.createFundAccount",
+        _ => "savings.createStockAccount"
+    };
+
+    private void Submit()
+    {
+        if (!editContext.Validate())
+        {
+            return;
+        }
+
+        HandleSubmit();
+    }
+
+    private void HandleSubmit() => MudDialog.Close(DialogResult.Ok(model));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    public sealed class CreateSavingsAccountDialogModel
+    {
+        public SavingsAccountType AccountType { get; set; }
+
+        [StringLength(100, ErrorMessage = "Bank name must be 100 characters or fewer.")]
+        public string ProviderName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Account name is required.")]
+        [StringLength(100, ErrorMessage = "Account name must be 100 characters or fewer.")]
+        public string AccountName { get; set; } = string.Empty;
+
+        [Range(typeof(decimal), "0.00", "999999999", ErrorMessage = "Opening balance must be zero or greater.")]
+        public decimal OpeningBalance { get; set; }
+    }
+}

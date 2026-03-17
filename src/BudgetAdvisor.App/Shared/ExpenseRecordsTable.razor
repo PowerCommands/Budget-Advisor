@@ -1,0 +1,157 @@
+@inject ApplicationState AppState
+@inject LocalizationService Localizer
+
+<section class="card-panel mt-4">
+    <div class="section-title-row">
+        <h2>@Localizer[TitleKey]</h2>
+        @if (ShowAllCostsToggle)
+        {
+            <label class="form-check-label d-flex align-items-center gap-2">
+                <InputCheckbox class="form-check-input mt-0" Value="IncludeAllCosts" ValueChanged="HandleIncludeAllCostsChanged" ValueExpression="() => IncludeAllCosts" />
+                <span>@Localizer["filter.showAllCosts"]</span>
+            </label>
+        }
+    </div>
+
+    <div class="form-grid mb-3">
+        <div>
+            <label class="form-label">@Localizer["filter.name"]</label>
+            <InputText class="form-control" @bind-Value="filter.Name" />
+        </div>
+        <div>
+            <label class="form-label">@Localizer["field.category"]</label>
+            <InputSelect class="form-select" @bind-Value="filter.CategoryFilter">
+                <option value="">@Localizer["filter.allCategories"]</option>
+                @foreach (var option in CategoryOptions)
+                {
+                    <option value="@option.Value">@GetCategoryOptionLabel(option)</option>
+                }
+            </InputSelect>
+        </div>
+        <div>
+            <label class="form-label">@Localizer["filter.startDate"]</label>
+            <InputDate class="form-control" @bind-Value="filter.StartDate" />
+        </div>
+        <div>
+            <label class="form-label">@Localizer["filter.endDate"]</label>
+            <InputDate class="form-control" @bind-Value="filter.EndDate" />
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table app-table">
+            <thead>
+                <tr>
+                    <th>@Localizer["field.name"]</th>
+                    <th>@Localizer["field.category"]</th>
+                    <th>@Localizer["table.period"]</th>
+                    <th>@Localizer["field.amount"]</th>
+                    @if (OnDelete.HasDelegate)
+                    {
+                        <th>@Localizer["field.actions"]</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @if (!FilteredEntries.Any())
+                {
+                    <tr>
+                        <td colspan="@GetColumnCount()" class="empty-state">@Localizer["table.noCostRows"]</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var entry in FilteredEntries)
+                    {
+                        <tr>
+                            <td>@GetEntryName(entry)</td>
+                            <td>@GetEntryCategoryLabel(entry)</td>
+                            <td>@FormatPeriod(entry)</td>
+                            <td>@AppState.FormatCurrency(entry.Amount)</td>
+                            @if (OnDelete.HasDelegate)
+                            {
+                                <td>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Color="Color.Error"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => OnDelete.InvokeAsync(entry))" />
+                                </td>
+                            }
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    private readonly ExpenseTableFilter filter = new();
+    private ExpenseQueryScope lastResolvedScope;
+
+    [Parameter]
+    public ExpenseQueryScope Scope { get; set; }
+
+    [Parameter]
+    public string TitleKey { get; set; } = "table.costRows";
+
+    [Parameter]
+    public bool ShowAllCostsToggle { get; set; }
+
+    [Parameter]
+    public bool IncludeAllCosts { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> IncludeAllCostsChanged { get; set; }
+
+    [Parameter]
+    public EventCallback<ExpenseEntry> OnDelete { get; set; }
+
+    private IReadOnlyList<ExpenseEntry> FilteredEntries => AppState.GetFilteredExpenseEntries(filter);
+
+    private IReadOnlyList<ExpenseFilterCategoryOption> CategoryOptions => AppState.GetExpenseFilterCategoryOptions(filter);
+
+    protected override void OnParametersSet()
+    {
+        var resolvedScope = ResolveScope();
+        if (resolvedScope != lastResolvedScope)
+        {
+            filter.CategoryFilter = string.Empty;
+            lastResolvedScope = resolvedScope;
+        }
+
+        filter.Scope = resolvedScope;
+    }
+
+    private async Task HandleIncludeAllCostsChanged(bool includeAllCosts)
+    {
+        filter.CategoryFilter = string.Empty;
+        await IncludeAllCostsChanged.InvokeAsync(includeAllCosts);
+    }
+
+    private ExpenseQueryScope ResolveScope() =>
+        ShowAllCostsToggle && IncludeAllCosts
+            ? ExpenseQueryScope.All
+            : Scope;
+
+    private bool UsesSubcategoryOnly => filter.Scope is ExpenseQueryScope.Housing or ExpenseQueryScope.Transport or ExpenseQueryScope.Credits or ExpenseQueryScope.Savings or ExpenseQueryScope.Assets;
+
+    private string GetCategoryOptionLabel(ExpenseFilterCategoryOption option) =>
+        UsesSubcategoryOnly
+            ? option.Subcategory
+            : $"{Localizer[$"expenseCategory.{option.Category}"]} / {option.Subcategory}";
+
+    private string GetEntryName(ExpenseEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.Description) || AppState.PreferSystemExpenseLabel(entry)
+            ? AppState.GetExpenseSubcategoryDisplay(entry)
+            : entry.Description;
+
+    private string GetEntryCategoryLabel(ExpenseEntry entry) =>
+        UsesSubcategoryOnly
+            ? AppState.GetExpenseSubcategoryDisplay(entry)
+            : $"{Localizer[$"expenseCategory.{entry.Category}"]} / {AppState.GetExpenseSubcategoryDisplay(entry)}";
+
+    private static string FormatPeriod(ExpenseEntry entry) => $"{entry.Year:0000}/{entry.Month:00}";
+
+    private int GetColumnCount() => OnDelete.HasDelegate ? 5 : 4;
+}
