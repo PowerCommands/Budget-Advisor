@@ -146,6 +146,10 @@
         <div class="stack-grid two-up mt-4">
             <section class="card-panel">
                 <h2>@Localizer["housing.costEntries"]</h2>
+                <label class="form-check d-inline-flex align-items-center gap-2 mb-3">
+                    <InputCheckbox class="form-check-input mt-0" @bind-Value="showAllHousingCosts" />
+                    <span>@Localizer["filter.showAllCosts"]</span>
+                </label>
                 <div class="table-responsive">
                     <table class="table app-table">
                         <thead>
@@ -159,21 +163,30 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var expense in HousingExpenses)
+                            @if (!HousingExpenses.Any())
                             {
                                 <tr>
-                                    <td>@expense.Description</td>
-                                    <td>@AppState.GetExpenseSubcategoryDisplay(expense)</td>
-                                    <td>@expense.Year</td>
-                                    <td>@Localizer[$"month.{expense.Month}"]</td>
-                                    <td>@AppState.FormatCurrency(expense.Amount)</td>
-                                    <td>
-                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                       Color="Color.Error"
-                                                       Size="Size.Small"
-                                                       OnClick="@(() => HandleDeleteExpenseAsync(expense))" />
-                                    </td>
+                                    <td colspan="6" class="empty-state">@Localizer["table.noCostRows"]</td>
                                 </tr>
+                            }
+                            else
+                            {
+                                @foreach (var expense in HousingExpenses)
+                                {
+                                    <tr>
+                                        <td>@expense.Description</td>
+                                        <td>@AppState.GetExpenseSubcategoryDisplay(expense)</td>
+                                        <td>@expense.Year</td>
+                                        <td>@Localizer[$"month.{expense.Month}"]</td>
+                                        <td>@AppState.FormatCurrency(expense.Amount)</td>
+                                        <td>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Color="Color.Error"
+                                                           Size="Size.Small"
+                                                           OnClick="@(() => HandleDeleteExpenseAsync(expense))" />
+                                        </td>
+                                    </tr>
+                                }
                             }
                         </tbody>
                     </table>
@@ -446,6 +459,7 @@
     private EditContext definitionEditContext = default!;
     private EditContext loanEditContext = default!;
     private string? statusMessage;
+    private bool showAllHousingCosts;
 
     private static IReadOnlyList<ResidenceTypeOption> ResidenceTypeOptions { get; } =
     [
@@ -464,7 +478,11 @@
 
     private IEnumerable<ExpenseEntry> HousingExpenses =>
         AppState.Data.ExpenseRecords
-            .Where(record => record.Category == ExpenseCategory.Housing)
+            .Where(record =>
+                showAllHousingCosts ||
+                (record.Category == ExpenseCategory.Housing &&
+                 record.Year == DateTime.Today.Year &&
+                 record.Month == DateTime.Today.Month))
             .OrderByDescending(record => record.Year)
             .ThenByDescending(record => record.Month)
             .ThenBy(record => record.Subcategory)

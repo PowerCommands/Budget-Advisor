@@ -125,6 +125,10 @@
         <div class="stack-grid two-up mt-4">
             <section class="card-panel">
                 <h2>@Localizer["transport.costEntries"]</h2>
+                <label class="form-check d-inline-flex align-items-center gap-2 mb-3">
+                    <InputCheckbox class="form-check-input mt-0" @bind-Value="showAllTransportCosts" />
+                    <span>@Localizer["filter.showAllCosts"]</span>
+                </label>
                 <div class="table-responsive">
                     <table class="table app-table">
                         <thead>
@@ -138,21 +142,30 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var expense in TransportExpenses)
+                            @if (!TransportExpenses.Any())
                             {
                                 <tr>
-                                    <td>@expense.Description</td>
-                                    <td>@AppState.GetExpenseSubcategoryDisplay(expense)</td>
-                                    <td>@expense.Year</td>
-                                    <td>@Localizer[$"month.{expense.Month}"]</td>
-                                    <td>@AppState.FormatCurrency(expense.Amount)</td>
-                                    <td>
-                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                       Color="Color.Error"
-                                                       Size="Size.Small"
-                                                       OnClick="@(() => HandleDeleteExpenseAsync(expense))" />
-                                    </td>
+                                    <td colspan="6" class="empty-state">@Localizer["table.noCostRows"]</td>
                                 </tr>
+                            }
+                            else
+                            {
+                                @foreach (var expense in TransportExpenses)
+                                {
+                                    <tr>
+                                        <td>@expense.Description</td>
+                                        <td>@AppState.GetExpenseSubcategoryDisplay(expense)</td>
+                                        <td>@expense.Year</td>
+                                        <td>@Localizer[$"month.{expense.Month}"]</td>
+                                        <td>@AppState.FormatCurrency(expense.Amount)</td>
+                                        <td>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Color="Color.Error"
+                                                           Size="Size.Small"
+                                                           OnClick="@(() => HandleDeleteExpenseAsync(expense))" />
+                                        </td>
+                                    </tr>
+                                }
                             }
                         </tbody>
                     </table>
@@ -632,6 +645,7 @@
     private EditContext leasingEditContext = default!;
     private EditContext vehicleEditContext = default!;
     private string? statusMessage;
+    private bool showAllTransportCosts;
 
     private static IReadOnlyList<Option<VehicleFuelType>> FuelTypeOptions { get; } =
     [
@@ -666,7 +680,11 @@
 
     private IEnumerable<ExpenseEntry> TransportExpenses =>
         AppState.Data.ExpenseRecords
-            .Where(record => record.Category == ExpenseCategory.Transport)
+            .Where(record =>
+                showAllTransportCosts ||
+                (record.Category == ExpenseCategory.Transport &&
+                 record.Year == DateTime.Today.Year &&
+                 record.Month == DateTime.Today.Month))
             .OrderByDescending(record => record.Year)
             .ThenByDescending(record => record.Month)
             .ThenBy(record => record.Subcategory)
