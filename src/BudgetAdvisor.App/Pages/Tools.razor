@@ -3,8 +3,10 @@
 @implements IDisposable
 @inject ApplicationState AppState
 @inject LocalizationService Localizer
-
-<PageTitle>Budget Advisor - @Localizer["nav.settings"]</PageTitle>
+@inject IApplicationLogService ApplicationLogService
+@inject IBrowserStorageUsageService BrowserStorageUsageService
+@inject IDialogService DialogService
+@using BudgetAdvisor.Domain.Theming
 
 <MudStack Spacing="3">
     <div class="page-header">
@@ -19,138 +21,252 @@
         <MudAlert Severity="Severity.Success" Variant="Variant.Filled">@statusMessage</MudAlert>
     }
 
-    <MudGrid Spacing="3">
-        <MudItem xs="12" md="4">
-            <MudPaper Class="card-panel settings-card" Elevation="0">
-                <MudStack Spacing="2">
-                    <div>
-                        <MudText Typo="Typo.h6">@Localizer["settings.language"]</MudText>
-                        <MudText Typo="Typo.body2">@Localizer["settings.languageHelp"]</MudText>
-                    </div>
-                    <MudSelect T="string"
-                               Label="@Localizer["language.select"]"
-                               Value="@Localizer.CurrentLanguage"
-                               ValueChanged="HandleLanguageChangedAsync"
-                               Variant="Variant.Outlined">
-                        @foreach (var language in Localizer.Languages)
-                        {
-                            <MudSelectItem T="string" Value="@language">@Localizer[$"language.{language}"]</MudSelectItem>
-                        }
-                    </MudSelect>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
+    <MudTabs Rounded="true" SliderColor="Color.Primary" Elevation="0">
+        <MudTabPanel Text="@Localizer["settings.tab.data"]" Icon="@Icons.Material.Filled.Storage">
+            <MudGrid Spacing="3" Class="mt-1">
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.applicationData"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.applicationDataHelp"]</MudText>
+                            </div>
+                            <div class="button-row">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleExportDataAsync">@Localizer["action.exportBackup"]</MudButton>
+                                <label class="mud-upload-label">
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" HtmlTag="span">@Localizer["action.importBackup"]</MudButton>
+                                    <InputFile OnChange="HandleImportDataAsync" accept=".json,application/json" hidden />
+                                </label>
+                            </div>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
 
-        <MudItem xs="12" md="4">
-            <MudPaper Class="card-panel settings-card" Elevation="0">
-                <MudStack Spacing="2">
-                    <div>
-                        <MudText Typo="Typo.h6">@Localizer["settings.currency"]</MudText>
-                        <MudText Typo="Typo.body2">@Localizer["settings.currencyHelp"]</MudText>
-                    </div>
-                    <MudSelect T="string"
-                               Label="@Localizer["settings.currency"]"
-                               Value="@AppState.Data.CurrencyCode"
-                               ValueChanged="HandleCurrencyChangedAsync"
-                               Variant="Variant.Outlined">
-                        @foreach (var currencyCode in CurrencyCodes)
-                        {
-                            <MudSelectItem T="string" Value="@currencyCode">@Localizer[$"currency.{currencyCode}"]</MudSelectItem>
-                        }
-                    </MudSelect>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2" AlignItems="AlignItems.Center">
+                            <div class="text-center">
+                                <MudText Typo="Typo.h6">LocalDB</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.localDbHelp"]</MudText>
+                            </div>
 
-        <MudItem xs="12" md="4">
-            <MudPaper Class="card-panel settings-card" Elevation="0">
-                <MudStack Spacing="2">
-                    <div>
-                        <MudText Typo="Typo.h6">@Localizer["settings.regional"]</MudText>
-                        <MudText Typo="Typo.body2">@Localizer["settings.regionalHelp"]</MudText>
-                    </div>
-                    <MudSelect T="string"
-                               Label="@Localizer["settings.decimalSeparator"]"
-                               Value="@AppState.Data.DecimalSeparator"
-                               ValueChanged="HandleDecimalSeparatorChangedAsync"
-                               Variant="Variant.Outlined">
-                        <MudSelectItem T="string" Value="@DotSeparator">.</MudSelectItem>
-                        <MudSelectItem T="string" Value="@CommaSeparator">,</MudSelectItem>
-                    </MudSelect>
-                    <MudSelect T="string"
-                               Label="@Localizer["settings.thousandsSeparator"]"
-                               Value="@AppState.Data.ThousandsSeparator"
-                               ValueChanged="HandleThousandsSeparatorChangedAsync"
-                               Variant="Variant.Outlined">
-                        <MudSelectItem T="string" Value="@SpaceThousandsSeparator">@Localizer["settings.thousandsSeparator.space"]</MudSelectItem>
-                        <MudSelectItem T="string" Value="@CommaSeparator">,</MudSelectItem>
-                        <MudSelectItem T="string" Value="@DotSeparator">.</MudSelectItem>
-                        <MudSelectItem T="string" Value="@NoThousandsSeparator">@Localizer["settings.thousandsSeparator.none"]</MudSelectItem>
-                    </MudSelect>
-                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-                        @Localizer["settings.preview"]: @AppState.FormatCurrency(1234567.89m)
-                    </MudAlert>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
+                            <MudChart ChartType="ChartType.Donut"
+                                      InputData="@StorageChartData"
+                                      InputLabels="@StorageChartLabels"
+                                      ChartOptions="@StorageChartOptions"
+                                      Width="220px"
+                                      Height="220px" />
 
-        <MudItem xs="12" md="4">
-            <MudPaper Class="card-panel settings-card" Elevation="0">
-                <MudStack Spacing="2">
-                    <div>
-                        <MudText Typo="Typo.h6">@Localizer["settings.theme"]</MudText>
-                        <MudText Typo="Typo.body2">@Localizer["settings.themeHelp"]</MudText>
-                    </div>
-                    <MudSelect T="string"
-                               Label="@Localizer["settings.theme"]"
-                               Value="@AppState.Data.ThemeMode"
-                               ValueChanged="HandleThemeModeChangedAsync"
-                               Variant="Variant.Outlined">
-                        <MudSelectItem T="string" Value="@PrimaryThemeMode">@Localizer["settings.theme.primary"]</MudSelectItem>
-                        <MudSelectItem T="string" Value="@SecondaryThemeMode">@Localizer["settings.theme.secondary"]</MudSelectItem>
-                        <MudSelectItem T="string" Value="@TertiaryThemeMode">@Localizer["settings.theme.tertiary"]</MudSelectItem>
-                        <MudSelectItem T="string" Value="@DarkThemeMode">@Localizer["settings.theme.dark"]</MudSelectItem>
-                    </MudSelect>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
+                            <MudStack Spacing="1" Class="w-100">
+                                <MudText Typo="Typo.body2">@Localizer["settings.storageUsed"]: @FormatStorageMb(StorageUsage.DisplayUsedBytes)</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.storageFree"]: @FormatStorageMb(StorageUsage.FreeBytes)</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.storageTotal"]: @FormatStorageMb(StorageUsage.TotalBytes)</MudText>
+                            </MudStack>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
 
-        <MudItem xs="12" md="4">
-            <MudPaper Class="card-panel settings-card" Elevation="0">
-                <MudStack Spacing="2">
-                    <div>
-                        <MudText Typo="Typo.h6">@Localizer["settings.applicationData"]</MudText>
-                        <MudText Typo="Typo.body2">@Localizer["settings.applicationDataHelp"]</MudText>
-                    </div>
-                    <div class="button-row">
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleExportDataAsync">@Localizer["action.exportBackup"]</MudButton>
-                        <label class="mud-upload-label">
-                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" HtmlTag="span">@Localizer["action.importBackup"]</MudButton>
-                            <InputFile OnChange="HandleImportDataAsync" accept=".json,application/json" hidden />
-                        </label>
-                    </div>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.dataPruning"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.dataPruningHelp"]</MudText>
+                            </div>
 
-        <MudItem xs="12" md="4">
-            <MudPaper Class="card-panel settings-card" Elevation="0">
-                <MudStack Spacing="2">
-                    <div>
-                        <MudText Typo="Typo.h6">@Localizer["settings.localizationExport"]</MudText>
-                        <MudText Typo="Typo.body2">@Localizer["settings.localizationImportHelp"]</MudText>
-                    </div>
-                    <div class="button-row">
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleExportLocalizationAsync">@Localizer["action.downloadLocalization"]</MudButton>
-                        <label class="mud-upload-label">
-                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" HtmlTag="span">@Localizer["action.uploadLocalization"]</MudButton>
-                            <InputFile OnChange="HandleImportLocalizationAsync" accept=".json,application/json" hidden />
-                        </label>
-                    </div>
-                </MudStack>
-            </MudPaper>
-        </MudItem>
-    </MudGrid>
+                            <div>
+                                <label class="form-label">@Localizer["settings.dataPruningCutoff"]</label>
+                                <InputDate class="form-control" @bind-Value="pruningCutoffDate" />
+                            </div>
+
+                            <MudButton Variant="Variant.Outlined"
+                                       Color="Color.Warning"
+                                       Disabled="@(!pruningCutoffDate.HasValue)"
+                                       OnClick="HandlePruneDataAsync">
+                                @Localizer["action.pruneData"]
+                            </MudButton>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        </MudTabPanel>
+
+        <MudTabPanel Text="@Localizer["settings.tab.regional"]" Icon="@Icons.Material.Filled.Language">
+            <MudGrid Spacing="3" Class="mt-1">
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.language"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.languageHelp"]</MudText>
+                            </div>
+                            <MudSelect T="string"
+                                       Label="@Localizer["language.select"]"
+                                       Value="@Localizer.CurrentLanguage"
+                                       ValueChanged="HandleLanguageChangedAsync"
+                                       Variant="Variant.Outlined">
+                                @foreach (var language in Localizer.Languages)
+                                {
+                                    <MudSelectItem T="string" Value="@language">@Localizer[$"language.{language}"]</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.currency"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.currencyHelp"]</MudText>
+                            </div>
+                            <MudSelect T="string"
+                                       Label="@Localizer["settings.currency"]"
+                                       Value="@AppState.Data.CurrencyCode"
+                                       ValueChanged="HandleCurrencyChangedAsync"
+                                       Variant="Variant.Outlined">
+                                @foreach (var currencyCode in CurrencyCodes)
+                                {
+                                    <MudSelectItem T="string" Value="@currencyCode">@Localizer[$"currency.{currencyCode}"]</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.regional"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.regionalHelp"]</MudText>
+                            </div>
+                            <MudSelect T="string"
+                                       Label="@Localizer["settings.decimalSeparator"]"
+                                       Value="@AppState.Data.DecimalSeparator"
+                                       ValueChanged="HandleDecimalSeparatorChangedAsync"
+                                       Variant="Variant.Outlined">
+                                <MudSelectItem T="string" Value="@DotSeparator">.</MudSelectItem>
+                                <MudSelectItem T="string" Value="@CommaSeparator">,</MudSelectItem>
+                            </MudSelect>
+                            <MudSelect T="string"
+                                       Label="@Localizer["settings.thousandsSeparator"]"
+                                       Value="@AppState.Data.ThousandsSeparator"
+                                       ValueChanged="HandleThousandsSeparatorChangedAsync"
+                                       Variant="Variant.Outlined">
+                                <MudSelectItem T="string" Value="@SpaceThousandsSeparator">@Localizer["settings.thousandsSeparator.space"]</MudSelectItem>
+                                <MudSelectItem T="string" Value="@CommaSeparator">,</MudSelectItem>
+                                <MudSelectItem T="string" Value="@DotSeparator">.</MudSelectItem>
+                                <MudSelectItem T="string" Value="@NoThousandsSeparator">@Localizer["settings.thousandsSeparator.none"]</MudSelectItem>
+                            </MudSelect>
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                                @Localizer["settings.preview"]: @AppState.FormatCurrency(1234567.89m)
+                            </MudAlert>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.localizationExport"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.localizationImportHelp"]</MudText>
+                            </div>
+                            <div class="button-row">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleExportLocalizationAsync">@Localizer["action.downloadLocalization"]</MudButton>
+                                <label class="mud-upload-label">
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" HtmlTag="span">@Localizer["action.uploadLocalization"]</MudButton>
+                                    <InputFile OnChange="HandleImportLocalizationAsync" accept=".json,application/json" hidden />
+                                </label>
+                            </div>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+            </MudGrid>
+        </MudTabPanel>
+
+        <MudTabPanel Text="@Localizer["settings.tab.appearance"]" Icon="@Icons.Material.Filled.Palette">
+            <MudGrid Spacing="3" Class="mt-1">
+                <MudItem xs="12" md="4">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.theme"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.themeHelp"]</MudText>
+                            </div>
+                            <MudSelect T="string"
+                                       Label="@Localizer["settings.theme"]"
+                                       Value="@AppState.Data.ThemeMode"
+                                       ValueChanged="HandleThemeModeChangedAsync"
+                                       Variant="Variant.Outlined">
+                                @foreach (var themeName in AppThemeNames.Names)
+                                {
+                                    <MudSelectItem T="string" Value="@themeName">@Localizer[$"settings.theme.{themeName}"]</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        </MudTabPanel>
+
+        <MudTabPanel Text="@Localizer["settings.tab.log"]" Icon="@Icons.Material.Filled.History">
+            <MudGrid Spacing="3" Class="mt-1">
+                <MudItem xs="12">
+                    <MudPaper Class="card-panel settings-card" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                                <div>
+                                    <MudText Typo="Typo.h6">@Localizer["settings.activityLog"]</MudText>
+                                    <MudText Typo="Typo.body2">@Localizer["settings.activityLogHelp"]</MudText>
+                                </div>
+                                <div class="button-row">
+                                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleDownloadLogAsync">@Localizer["action.downloadLog"]</MudButton>
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="HandleClearLogAsync">@Localizer["action.clearLog"]</MudButton>
+                                </div>
+                            </div>
+
+                            @if (ApplicationLogService.Entries.Count == 0)
+                            {
+                                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                                    @Localizer["settings.noActivityLogEntries"]
+                                </MudAlert>
+                            }
+                            else
+                            {
+                                <div class="table-responsive">
+                                    <table class="table app-table">
+                                        <thead>
+                                            <tr>
+                                                <th>@Localizer["field.timestamp"]</th>
+                                                <th>@Localizer["field.description"]</th>
+                                                <th>@Localizer["field.activity"]</th>
+                                                <th>@Localizer["field.status"]</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var entry in ApplicationLogService.Entries)
+                                            {
+                                                <tr>
+                                                    <td>@entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                                    <td>@entry.Description</td>
+                                                    <td>@entry.Activity</td>
+                                                    <td>@entry.Status</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        </MudTabPanel>
+    </MudTabs>
 </MudStack>
 
 @code {
@@ -158,18 +274,43 @@
     private const string CommaSeparator = ",";
     private const string SpaceThousandsSeparator = " ";
     private const string NoThousandsSeparator = "";
-    private const string PrimaryThemeMode = "Primary";
-    private const string SecondaryThemeMode = "Secondary";
-    private const string TertiaryThemeMode = "Tertiary";
-    private const string DarkThemeMode = "Dark";
     private static readonly string[] CurrencyCodes = ["SEK", "USD", "EUR", "GBP"];
+    private BrowserStorageUsageSnapshot StorageUsage { get; set; } = new();
+    private DateTime? pruningCutoffDate;
     private string? statusMessage;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         Localizer.Changed += HandleChanged;
         AppState.Changed += HandleChanged;
+        ApplicationLogService.Changed += HandleChanged;
+        await RefreshStorageUsageAsync();
     }
+
+    private double[] StorageChartData =>
+    [
+        Convert.ToDouble(StorageUsage.DisplayUsedBytes),
+        Convert.ToDouble(StorageUsage.FreeBytes)
+    ];
+
+    private string[] StorageChartLabels =>
+    [
+        Localizer["settings.storageUsed"],
+        Localizer["settings.storageFree"]
+    ];
+
+    private string[] StorageChartPalette =>
+    [
+        GetUsedStorageColor(StorageUsage.DisplayUsedBytes),
+        "#2E7D32"
+    ];
+
+    private ChartOptions StorageChartOptions => new()
+    {
+        ChartPalette = StorageChartPalette,
+        ShowLegend = true,
+        ShowLabels = false
+    };
 
     private async Task HandleExportDataAsync()
     {
@@ -227,17 +368,126 @@
         statusMessage = Localizer["settings.themeUpdated"];
     }
 
+    private async Task HandleDownloadLogAsync()
+    {
+        await ApplicationLogService.ExportAsync();
+        statusMessage = Localizer["settings.activityLogExported"];
+    }
+
+    private async Task HandleClearLogAsync()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["settings.clearLogTitle"] },
+            { dialog => dialog.Message, Localizer["settings.clearLogMessage"] },
+            { dialog => dialog.ConfirmText, Localizer["action.clearLog"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["settings.clearLogTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await ApplicationLogService.ClearAsync();
+        statusMessage = Localizer["settings.activityLogCleared"];
+    }
+
+    private async Task HandlePruneDataAsync()
+    {
+        if (!pruningCutoffDate.HasValue)
+        {
+            return;
+        }
+
+        var cutoffDate = DateOnly.FromDateTime(pruningCutoffDate.Value);
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["settings.pruneDataTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["settings.pruneDataMessage"], cutoffDate.ToString("yyyy-MM-dd")) },
+            { dialog => dialog.ConfirmText, Localizer["action.pruneData"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Warning }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["settings.pruneDataTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        var summary = await AppState.PruneDataAsync(cutoffDate);
+        statusMessage = string.Format(
+            Localizer["settings.pruneDataCompleted"],
+            cutoffDate.ToString("yyyy-MM-dd"),
+            summary.TotalRemoved,
+            summary.IncomeEntriesRemoved,
+            summary.ExpenseEntriesRemoved,
+            summary.MonthlyBalancesRemoved,
+            summary.SalarySeriesRemoved,
+            summary.RecurringExpenseDefinitionsRemoved);
+    }
+
     private static async Task<string> ReadFileAsync(IBrowserFile file)
     {
         using var reader = new StreamReader(file.OpenReadStream(maxAllowedSize: 1024 * 1024));
         return await reader.ReadToEndAsync();
     }
 
-    private void HandleChanged() => InvokeAsync(StateHasChanged);
+    private void HandleChanged() => _ = InvokeAsync(RefreshStateAsync);
+
+    private async Task RefreshStateAsync()
+    {
+        await RefreshStorageUsageAsync();
+        StateHasChanged();
+    }
+
+    private async Task RefreshStorageUsageAsync()
+    {
+        StorageUsage = await BrowserStorageUsageService.GetUsageAsync();
+    }
+
+    private static string GetUsedStorageColor(long usedBytes)
+    {
+        var usedMegabytes = usedBytes / 1024d / 1024d;
+
+        if (usedMegabytes >= 8d)
+        {
+            return "#E53935";
+        }
+
+        if (usedMegabytes >= 5d)
+        {
+            return "#FFB300";
+        }
+
+        return "#1565C0";
+    }
+
+    private static string FormatStorageMb(long bytes)
+    {
+        var megabytes = bytes / 1024d / 1024d;
+        return $"{megabytes:0.00} MB";
+    }
 
     public void Dispose()
     {
         Localizer.Changed -= HandleChanged;
         AppState.Changed -= HandleChanged;
+        ApplicationLogService.Changed -= HandleChanged;
     }
 }

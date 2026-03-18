@@ -1,0 +1,161 @@
+﻿@implements IDisposable
+@inject LocalizationService Localizer
+@inject NavigationManager NavigationManager
+@using BudgetAdvisor.App.Pages
+
+<PageTitle>Budget Advisor - @GetCurrentPageTitle()</PageTitle>
+
+@if (IsNotFound)
+{
+    <NotFound />
+}
+else
+{
+    <div class="page-host">
+        @if (visitedPageKeys.Contains(StartPageKey))
+        {
+            <div class="@GetPagePanelClass(StartPageKey)">
+                <Start />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(HouseholdPageKey))
+        {
+            <div class="@GetPagePanelClass(HouseholdPageKey)">
+                <Household />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(HousingPageKey))
+        {
+            <div class="@GetPagePanelClass(HousingPageKey)">
+                <Housing />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(TransportPageKey))
+        {
+            <div class="@GetPagePanelClass(TransportPageKey)">
+                <Transport />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(ExpensesPageKey))
+        {
+            <div class="@GetPagePanelClass(ExpensesPageKey)">
+                <Expenses />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(CreditsPageKey))
+        {
+            <div class="@GetPagePanelClass(CreditsPageKey)">
+                <Debts />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(SavingsPageKey))
+        {
+            <div class="@GetPagePanelClass(SavingsPageKey)">
+                <Savings />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(AssetsPageKey))
+        {
+            <div class="@GetPagePanelClass(AssetsPageKey)">
+                <Assets />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(SettingsPageKey))
+        {
+            <div class="@GetPagePanelClass(SettingsPageKey)">
+                <Tools />
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private const string StartPageKey = "start";
+    private const string HouseholdPageKey = "household";
+    private const string HousingPageKey = "housing";
+    private const string TransportPageKey = "transport";
+    private const string ExpensesPageKey = "expenses";
+    private const string CreditsPageKey = "credits";
+    private const string SavingsPageKey = "savings";
+    private const string AssetsPageKey = "assets";
+    private const string SettingsPageKey = "settings";
+    private const string NotFoundPageKey = "not-found";
+
+    private readonly HashSet<string> visitedPageKeys = [];
+
+    private string CurrentPageKey => ResolvePageKey();
+
+    private bool IsNotFound => string.Equals(CurrentPageKey, NotFoundPageKey, StringComparison.Ordinal);
+
+    protected override void OnInitialized()
+    {
+        NavigationManager.LocationChanged += HandleLocationChanged;
+        EnsureCurrentPageIsVisited();
+    }
+
+    private string GetCurrentPageTitle() =>
+        CurrentPageKey switch
+        {
+            StartPageKey => Localizer["nav.start"],
+            HouseholdPageKey => Localizer["nav.household"],
+            HousingPageKey => Localizer["nav.housingTab"],
+            TransportPageKey => Localizer["nav.transport"],
+            ExpensesPageKey => Localizer["nav.expenses"],
+            CreditsPageKey => Localizer["nav.credits"],
+            SavingsPageKey => Localizer["nav.savings"],
+            AssetsPageKey => Localizer["nav.assets"],
+            SettingsPageKey => Localizer["nav.settings"],
+            _ => Localizer["common.notFound"]
+        };
+
+    private string GetPagePanelClass(string pageKey) =>
+        string.Equals(CurrentPageKey, pageKey, StringComparison.Ordinal)
+            ? "page-host-panel"
+            : "page-host-panel page-host-panel-hidden";
+
+    private void EnsureCurrentPageIsVisited()
+    {
+        if (!IsNotFound)
+        {
+            visitedPageKeys.Add(CurrentPageKey);
+        }
+    }
+
+    private string ResolvePageKey()
+    {
+        var relativePath = NavigationManager.ToBaseRelativePath(NavigationManager.Uri).Split('?', '#')[0].Trim('/');
+
+        return relativePath.ToLowerInvariant() switch
+        {
+            "" => StartPageKey,
+            "household" => HouseholdPageKey,
+            "housing" => HousingPageKey,
+            "transport" => TransportPageKey,
+            "expenses" => ExpensesPageKey,
+            "credits" or "debts" => CreditsPageKey,
+            "savings" => SavingsPageKey,
+            "assets" => AssetsPageKey,
+            "tools" or "settings" => SettingsPageKey,
+            _ => NotFoundPageKey
+        };
+    }
+
+    private void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        EnsureCurrentPageIsVisited();
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= HandleLocationChanged;
+    }
+}

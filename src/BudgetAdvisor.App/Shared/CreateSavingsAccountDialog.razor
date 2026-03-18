@@ -10,14 +10,11 @@
             <ValidationSummary />
 
             <div class="form-grid mt-3">
-                @if (AccountType == SavingsAccountType.Bank)
-                {
-                    <div>
-                        <label class="form-label">@Localizer["savings.bankName"]</label>
-                        <InputText class="form-control" @bind-Value="model.ProviderName" />
-                        <ValidationMessage For="() => model.ProviderName" />
-                    </div>
-                }
+                <div>
+                    <label class="form-label">@GetProviderLabel()</label>
+                    <InputText class="form-control" @bind-Value="model.ProviderName" />
+                    <ValidationMessage For="() => model.ProviderName" />
+                </div>
                 <div>
                     <label class="form-label">@Localizer["savings.accountName"]</label>
                     <InputText class="form-control" @bind-Value="model.AccountName" />
@@ -27,6 +24,11 @@
                     <label class="form-label">@Localizer["savings.openingBalance"]</label>
                     <InputNumber class="form-control" @bind-Value="model.OpeningBalance" />
                     <ValidationMessage For="() => model.OpeningBalance" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.start"]</label>
+                    <InputDate class="form-control" @bind-Value="model.StartDate" />
+                    <ValidationMessage For="() => model.StartDate" />
                 </div>
             </div>
         </EditForm>
@@ -60,6 +62,13 @@
         _ => "savings.createStockAccount"
     };
 
+    private string GetProviderLabel() => AccountType switch
+    {
+        SavingsAccountType.Bank => Localizer["savings.bankName"],
+        SavingsAccountType.Fund => Localizer["savings.depotName"],
+        _ => Localizer["savings.depotName"]
+    };
+
     private void Submit()
     {
         if (!editContext.Validate())
@@ -87,5 +96,8 @@
 
         [Range(typeof(decimal), "0.00", "999999999", ErrorMessage = "Opening balance must be zero or greater.")]
         public decimal OpeningBalance { get; set; }
+
+        [Required(ErrorMessage = "Start date is required.")]
+        public DateTime? StartDate { get; set; } = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     }
 }

@@ -14,7 +14,5 @@ public sealed class HousingLoan
 
     public decimal StartingRemainingDebt { get; set; }
 
-    public decimal RemainingDebt { get; set; }
-
     public decimal CurrentAmortization { get; set; }
 }

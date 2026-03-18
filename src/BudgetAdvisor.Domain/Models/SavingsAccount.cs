@@ -15,6 +15,4 @@ public sealed class SavingsAccount
     public DateOnly CreatedDate { get; set; } = DateOnly.FromDateTime(DateTime.Today);
 
     public decimal OpeningBalance { get; set; }
-
-    public decimal CurrentBalance { get; set; }
 }

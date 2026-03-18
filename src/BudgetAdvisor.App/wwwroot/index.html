@@ -17,11 +17,16 @@
 
 <body>
     <div id="app">
-        <svg class="loading-progress">
-            <circle r="40%" cx="50%" cy="50%" />
-            <circle r="40%" cx="50%" cy="50%" />
-        </svg>
-        <div class="loading-progress-text"></div>
+        <div class="loading-shell" aria-live="polite" aria-busy="true">
+            <div class="loading-card">
+                <div class="loading-orbit">
+                    <div class="loading-ring"></div>
+                    <div class="loading-core"></div>
+                </div>
+                <div class="loading-progress-text"></div>
+                <div class="loading-caption">Preparing your workspace</div>
+            </div>
+        </div>
     </div>
 
     <div id="blazor-error-ui">

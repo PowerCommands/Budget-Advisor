@@ -2,9 +2,13 @@
 @implements IDisposable
 @inject ApplicationState AppState
 @inject LocalizationService Localizer
+@inject IApplicationLogService ApplicationLogService
+@inject IUndoService UndoService
 @inject NavigationManager NavigationManager
+@using BudgetAdvisor.App.Theming
+@using BudgetAdvisor.Domain.Theming
 
-<MudThemeProvider Theme="@GetAppTheme()" IsDarkMode="@IsDarkMode" />
+<MudThemeProvider Theme="@AppThemes.GetTheme(AppState.Data.ThemeMode)" IsDarkMode="@AppThemeNames.IsDark(AppState.Data.ThemeMode)" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
@@ -18,6 +22,15 @@
                     <div class="app-title-row">
                         <div class="app-title">@Localizer["app.title"]</div>
                         <MudChip T="string" Color="Color.Primary" Variant="Variant.Outlined">v1.0</MudChip>
+                        @if (UndoService.CanUndo)
+                        {
+                            <MudButton Variant="Variant.Text"
+                                       Color="Color.Default"
+                                       StartIcon="@Icons.Material.Filled.Undo"
+                                       OnClick="HandleUndoAsync">
+                                @GetUndoLabel()
+                            </MudButton>
+                        }
                     </div>
                     <div class="eyebrow">Budget Advisor - @GetCurrentSectionTitle()</div>
                 </div>
@@ -72,6 +85,8 @@
     {
         Localizer.Changed += HandleChanged;
         AppState.Changed += HandleChanged;
+        ApplicationLogService.Changed += HandleChanged;
+        UndoService.Changed += HandleChanged;
         NavigationManager.LocationChanged += HandleLocationChanged;
     }
 
@@ -80,88 +95,21 @@
         await Localizer.SetLanguageAsync(languageCode);
     }
 
-    private bool IsDarkMode => string.Equals(AppState.Data.ThemeMode, "Dark", StringComparison.OrdinalIgnoreCase);
-
-    private MudTheme GetAppTheme()
-    {
-        var themeMode = AppState.Data.ThemeMode;
-
-        return themeMode switch
-        {
-            "Secondary" => CreateTheme("#7c4dff", "#03dac6", "#f7f5ff", "#ffffff", "#1f1b2d", "#6a6480"),
-            "Tertiary" => CreateTheme("#ff6f00", "#00acc1", "#fff8f1", "#ffffff", "#2b2118", "#756657"),
-            "Dark" => CreateDarkTheme(),
-            _ => CreateTheme("#594ae2", "#ff4081", "#f6f7fb", "#ffffff", "#1d2233", "#6b7285")
-        };
-    }
-
-    private static MudTheme CreateTheme(
-        string primary,
-        string secondary,
-        string background,
-        string surface,
-        string textPrimary,
-        string textSecondary) => new()
-        {
-            PaletteLight = new PaletteLight
-            {
-                Primary = primary,
-                Secondary = secondary,
-                Tertiary = "#8bc34a",
-                Background = background,
-                Surface = surface,
-                DrawerBackground = surface,
-                AppbarBackground = surface,
-                TextPrimary = textPrimary,
-                TextSecondary = textSecondary
-            },
-            PaletteDark = CreateDarkTheme().PaletteDark,
-            Typography = new Typography
-            {
-                Default = new DefaultTypography
-                {
-                    FontFamily = ["Roboto", "Helvetica", "Arial", "sans-serif"]
-                }
-            }
-        };
-
-    private static MudTheme CreateDarkTheme() => new()
-    {
-        PaletteLight = new PaletteLight
-        {
-            Primary = "#594ae2",
-            Secondary = "#ff4081",
-            Tertiary = "#8cbf26",
-            Background = "#f6f7fb",
-            Surface = "#ffffff",
-            DrawerBackground = "#ffffff",
-            AppbarBackground = "#ffffff",
-            TextPrimary = "#1d2233",
-            TextSecondary = "#6b7285"
-        },
-        PaletteDark = new PaletteDark
-        {
-            Primary = "#8b80ff",
-            Secondary = "#ff79b0",
-            Tertiary = "#b6e36d",
-            Background = "#12151c",
-            Surface = "#1b2030",
-            DrawerBackground = "#1b2030",
-            AppbarBackground = "#1b2030",
-            TextPrimary = "#f3f5fa",
-            TextSecondary = "#aeb7cc"
-        },
-        Typography = new Typography
-        {
-            Default = new DefaultTypography
-            {
-                FontFamily = ["Roboto", "Helvetica", "Arial", "sans-serif"]
-            }
-        }
-    };
-
     private static string GetLanguageButtonClass(bool isSelected) =>
         isSelected ? "language-flag-button selected" : "language-flag-button";
+
+    private async Task HandleUndoAsync()
+    {
+        await AppState.UndoLastChangeAsync();
+    }
+
+    private string GetUndoLabel()
+    {
+        var latestActivity = ApplicationLogService.Entries.FirstOrDefault()?.Activity;
+        return string.IsNullOrWhiteSpace(latestActivity)
+            ? Localizer["action.undo"]
+            : $"{Localizer["action.undo"]} {latestActivity}";
+    }
 
     private string GetCurrentSectionTitle()
     {
@@ -236,6 +184,8 @@
     {
         Localizer.Changed -= HandleChanged;
         AppState.Changed -= HandleChanged;
+        ApplicationLogService.Changed -= HandleChanged;
+        UndoService.Changed -= HandleChanged;
         NavigationManager.LocationChanged -= HandleLocationChanged;
     }
 }

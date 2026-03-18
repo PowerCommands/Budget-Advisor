@@ -19,8 +19,8 @@ public sealed class LocalStorageService
 
     public async Task SaveAsync<T>(string key, T value)
     {
-        var json = JsonSerializer.Serialize(value, JsonOptions);
-        await _jsRuntime.InvokeVoidAsync("budgetAdvisor.storage.save", key, json);
+        var json = Serialize(value);
+        await SaveJsonAsync(key, json);
     }
 
     public async Task<T?> LoadAsync<T>(string key)
@@ -31,14 +31,23 @@ public sealed class LocalStorageService
 
     public async Task<string> BackupAsync<T>(string fileName, T value)
     {
-        var json = JsonSerializer.Serialize(value, JsonOptions);
+        var json = Serialize(value);
         await _jsRuntime.InvokeVoidAsync("budgetAdvisor.files.downloadText", fileName, json, "application/json");
         return json;
     }
 
+    public string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
+
+    public T? Deserialize<T>(string json) => JsonSerializer.Deserialize<T>(json, JsonOptions);
+
+    public async Task SaveJsonAsync(string key, string json)
+    {
+        await _jsRuntime.InvokeVoidAsync("budgetAdvisor.storage.save", key, json);
+    }
+
     public Task<T?> RestoreAsync<T>(string json)
     {
-        var value = JsonSerializer.Deserialize<T>(json, JsonOptions);
+        var value = Deserialize<T>(json);
         return Task.FromResult(value);
     }
 }

@@ -3,6 +3,8 @@ using BudgetAdvisor.Domain.Models;
 using BudgetAdvisor.Services.Extensions;
 using System.Globalization;
 
+using BudgetAdvisor.Domain.Theming;
+
 namespace BudgetAdvisor.Services;
 
 public sealed class ApplicationState
@@ -24,21 +26,28 @@ public sealed class ApplicationState
 
     private readonly LocalStorageService _localStorageService;
     private readonly LocalizationService _localizer;
+    private readonly IApplicationLogService _applicationLogService;
+    private readonly IDataPruningService _dataPruningService;
+    private readonly IUndoService _undoService;
 
     public event Action? Changed;
 
     public ApplicationData Data { get; private set; } = new();
 
-    public ApplicationState(LocalStorageService localStorageService, LocalizationService localizer)
+    public ApplicationState(LocalStorageService localStorageService, LocalizationService localizer, IApplicationLogService applicationLogService, IDataPruningService dataPruningService, IUndoService undoService)
     {
         _localStorageService = localStorageService;
         _localizer = localizer;
+        _applicationLogService = applicationLogService;
+        _dataPruningService = dataPruningService;
+        _undoService = undoService;
     }
 
     public async Task InitializeAsync()
     {
         Data = await _localStorageService.LoadAsync<ApplicationData>(ApplicationDataKey) ?? new ApplicationData();
         NormalizeData();
+        _undoService.InitializeCurrentState(_localStorageService.Serialize(Data));
     }
 
     public IReadOnlyList<ExpenseEntry> GetFilteredExpenseEntries(ExpenseTableFilter filter)
@@ -78,20 +87,38 @@ public sealed class ApplicationState
 
     public async Task AddMemberAsync(string name)
     {
-        Data.Members.Add(new HouseholdMember { Name = name.Trim() });
-        await PersistAndNotifyAsync();
+        var memberName = name.Trim();
+        Data.Members.Add(new HouseholdMember { Name = memberName });
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.membersTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.member", memberName));
     }
 
     public async Task AddOneTimeIncomeAsync(Guid memberId, decimal amount, int year, int month, string type, string? metadata = null, Guid? savingsAccountId = null, Guid? assetId = null)
     {
         Data.IncomeRecords.Add(CreateOneTimeIncomeEntry(memberId, amount, year, month, NormalizeSystemIncomeType(type), metadata, savingsAccountId, assetId));
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.incomesTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.income", BuildIncomeLogSubject(memberId, type)));
     }
 
     public async Task AddMonthlySalaryAsync(Guid memberId, decimal amount, int startYear, int startMonth, int endYear, int endMonth)
     {
         var seriesId = Guid.NewGuid();
+        var memberName = GetMember(memberId).Name;
+
+        Data.SalaryIncomePeriods.Add(new SalaryIncomePeriod
+        {
+            SeriesId = seriesId,
+            MemberId = memberId,
+            MemberName = memberName,
+            MonthlyAmount = amount,
+            StartYear = startYear,
+            StartMonth = startMonth,
+            EndYear = endYear,
+            EndMonth = endMonth
+        });
 
         foreach (var month in EnumerateMonths(startYear, startMonth, endYear, endMonth))
         {
@@ -106,13 +133,32 @@ public sealed class ApplicationState
             });
         }
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.salaryTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.salaryPeriod", memberName));
     }
 
     public async Task AddYearlyIncomeAsync(Guid memberId, decimal amount, int year, string type)
     {
         var seriesId = Guid.NewGuid();
+        var normalizedType = NormalizeSystemIncomeType(type);
         var distributedAmounts = DistributeAcrossMonths(amount);
+
+        if (string.Equals(normalizedType, SalaryIncomeType, StringComparison.OrdinalIgnoreCase))
+        {
+            Data.SalaryIncomePeriods.Add(new SalaryIncomePeriod
+            {
+                SeriesId = seriesId,
+                MemberId = memberId,
+                MemberName = GetMember(memberId).Name,
+                MonthlyAmount = distributedAmounts[0],
+                StartYear = year,
+                StartMonth = 1,
+                EndYear = year,
+                EndMonth = 12
+            });
+        }
+
         for (var month = 1; month <= 12; month++)
         {
             Data.IncomeRecords.Add(new IncomeEntry
@@ -121,19 +167,76 @@ public sealed class ApplicationState
                 Amount = distributedAmounts[month - 1],
                 Year = year,
                 Month = month,
-                Type = NormalizeSystemIncomeType(type),
+                Type = normalizedType,
                 SeriesId = seriesId
             });
         }
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.salaryTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.salaryPeriod", GetMember(memberId).Name));
     }
 
     public async Task AddOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null)
     {
         Data.ExpenseRecords.Add(CreateOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId));
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.expense", GetExpenseActivitySubject(subcategory, description)));
+    }
+
+    public async Task ImportExpenseEntriesAsync(IEnumerable<ImportedExpenseDraft> drafts)
+    {
+        ArgumentNullException.ThrowIfNull(drafts);
+
+        foreach (var draft in drafts)
+        {
+            await ImportExpenseEntryAsync(draft);
+        }
+    }
+
+    public async Task ImportExpenseEntryAsync(ImportedExpenseDraft draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        if (draft.IsRecurring && draft.EndDate.HasValue)
+        {
+            Data.Subscriptions.Add(new SubscriptionExpenseDefinition
+            {
+                Name = draft.Description.Trim(),
+                Amount = draft.Amount,
+                IntervalMonths = 1,
+                StartYear = draft.Date.Year,
+                StartMonth = draft.Date.Month,
+                EndYear = draft.EndDate.Value.Year,
+                EndMonth = draft.EndDate.Value.Month,
+                Category = draft.Category,
+                Subcategory = draft.Subcategory.Trim()
+            });
+
+            await RegenerateSubscriptionExpensesAsync();
+            await LogActivityAsync(
+                BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.subscriptionAndDefinitions"]),
+                BuildLogActivity("log.verb.added", "log.entity.recurringExpense", draft.Description));
+            return;
+        }
+
+        Data.ExpenseRecords.Add(CreateOneTimeExpenseEntry(
+            draft.Amount,
+            draft.Date.Year,
+            draft.Date.Month,
+            draft.Category,
+            draft.Subcategory,
+            draft.Description,
+            null,
+            null,
+            null,
+            null));
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
+            BuildLogActivity("log.verb.imported", "log.entity.expense", draft.Description));
     }
 
     public async Task AddSubscriptionAsync(string name, decimal amount, int intervalMonths, int startYear, int startMonth, int? endYear, int? endMonth, ExpenseCategory category, string subcategory)
@@ -152,6 +255,9 @@ public sealed class ApplicationState
         });
 
         await RegenerateSubscriptionExpensesAsync();
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.subscriptionAndDefinitions"]),
+            BuildLogActivity("log.verb.added", "log.entity.recurringExpense", name));
     }
 
     public async Task AddHousingDefinitionAsync(decimal amount, int intervalMonths, int startYear, int startMonth, int endYear, int endMonth, string subcategory, string description)
@@ -184,7 +290,9 @@ public sealed class ApplicationState
             });
         }
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.housingTab"], _localizer["housing.recurringCostsTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.housingDefinition", definition.Description));
     }
 
     public async Task AddTransportDefinitionAsync(decimal amount, int intervalMonths, int startYear, int startMonth, int endYear, int endMonth, string subcategory, Guid vehicleId)
@@ -220,42 +328,56 @@ public sealed class ApplicationState
             });
         }
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.recurringCostsTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.transportDefinition", vehicle.Name));
     }
 
     public async Task AddHousingLoanAsync(string name, string lender, DateOnly loanStartDate, decimal initialLoanAmount, decimal remainingDebt)
     {
-        Data.HousingLoans.Add(new HousingLoan
+        var loan = new HousingLoan
         {
             Name = name.Trim(),
             Lender = lender.Trim(),
             LoanStartDate = loanStartDate,
             InitialLoanAmount = initialLoanAmount,
             StartingRemainingDebt = remainingDebt,
-            RemainingDebt = remainingDebt,
             CurrentAmortization = 0m
-        });
+        };
 
-        await RecalculateHousingLoanCostsAsync();
+        Data.HousingLoans.Add(loan);
+        SetMonthlyBalance(loan.Id, NormalizeMonth(loanStartDate), remainingDebt);
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.housingTab"], _localizer["housing.loansTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.housingLoan", name));
     }
 
-    public async Task AddLoanInterestBindingPeriodAsync(Guid loanId, DateOnly startDate, DateOnly endDate, decimal interestRate)
+    public async Task AddLoanInterestBindingPeriodAsync(Guid loanId, DateOnly startDate, DateOnly endDate, decimal interestRate, decimal monthlyAmortization)
     {
         ValidateAnyLoanExists(loanId);
         ValidateNoMonthOverlap(
             startDate,
             endDate,
-            Data.LoanInterestBindingPeriods.Where(period => period.LoanId == loanId).Select(period => (period.StartDate, period.EndDate)));
+            Data.LoanInterestBindingPeriods.Where(period => period.LoanId == loanId).Select(period => (period.StartMonth, period.EndMonth)));
 
         Data.LoanInterestBindingPeriods.Add(new LoanInterestBindingPeriod
         {
             LoanId = loanId,
-            StartDate = startDate,
-            EndDate = endDate,
-            InterestRate = interestRate
+            StartDate = NormalizeMonth(startDate),
+            EndDate = NormalizeMonth(endDate),
+            StartMonth = NormalizeMonth(startDate),
+            EndMonth = NormalizeMonth(endDate),
+            InterestRate = interestRate,
+            MonthlyAmortization = monthlyAmortization
         });
 
-        await RecalculateLoanCategoryCostsAsync(loanId);
+        await CalculateLoanCategoryCostsAsync(loanId, NormalizeMonth(startDate), NormalizeMonth(endDate));
+        await LogActivityAsync(
+            BuildLogDescription(
+                Data.HousingLoans.Any(loan => loan.Id == loanId) ? _localizer["nav.housingTab"] : _localizer["nav.transport"],
+                Data.HousingLoans.Any(loan => loan.Id == loanId) ? _localizer["housing.loansTab"] : _localizer["transport.loansTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.bindingPeriod", FormatMonthRange(startDate, endDate)));
     }
 
     public async Task AddLoanAmortizationPlanAsync(Guid loanId, DateOnly startDate, DateOnly endDate, decimal monthlyAmortizationAmount)
@@ -275,6 +397,11 @@ public sealed class ApplicationState
         });
 
         await RecalculateLoanCategoryCostsAsync(loanId);
+        await LogActivityAsync(
+            BuildLogDescription(
+                Data.HousingLoans.Any(loan => loan.Id == loanId) ? _localizer["nav.housingTab"] : _localizer["nav.transport"],
+                Data.HousingLoans.Any(loan => loan.Id == loanId) ? _localizer["housing.loansTab"] : _localizer["transport.loansTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.amortizationPlan", FormatMonthRange(startDate, endDate)));
     }
 
     public async Task AddHousingLoanAmortizationAsync(Guid loanId, DateOnly month, decimal monthlyAmortizationAmount)
@@ -292,36 +419,34 @@ public sealed class ApplicationState
         }
 
         var effectiveStartDate = NormalizeMonth(DateOnly.FromDateTime(DateTime.Today));
-        if (effectiveStartDate < NormalizeMonth(period.StartDate))
+        if (effectiveStartDate < NormalizeMonth(period.StartMonth))
         {
-            effectiveStartDate = NormalizeMonth(period.StartDate);
+            effectiveStartDate = NormalizeMonth(period.StartMonth);
         }
 
-        var effectiveEndDate = NormalizeMonth(period.EndDate);
-        if (effectiveStartDate > effectiveEndDate)
-        {
-            return;
-        }
-
-        await CalculateHousingLoanCostsAsync(effectiveStartDate, effectiveEndDate);
+        await CalculateHousingLoanCostsAsync(effectiveStartDate, NormalizeMonth(period.EndMonth));
     }
 
     public async Task AddTransportLoanAsync(Guid vehicleId, string lender, DateOnly loanStartDate, decimal initialLoanAmount, decimal remainingDebt)
     {
         _ = GetTransportVehicle(vehicleId);
 
-        Data.TransportLoans.Add(new TransportLoan
+        var loan = new TransportLoan
         {
             VehicleId = vehicleId,
             Lender = lender.Trim(),
             LoanStartDate = loanStartDate,
             InitialLoanAmount = initialLoanAmount,
             StartingRemainingDebt = remainingDebt,
-            RemainingDebt = remainingDebt,
             CurrentAmortization = 0m
-        });
+        };
 
-        await RecalculateTransportCostsAsync();
+        Data.TransportLoans.Add(loan);
+        SetMonthlyBalance(loan.Id, NormalizeMonth(loanStartDate), remainingDebt);
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.loansTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.transportLoan", lender));
     }
 
     public async Task AddTransportLeasingContractAsync(Guid vehicleId, DateOnly startDate, DateOnly endDate, decimal monthlyCost)
@@ -342,6 +467,9 @@ public sealed class ApplicationState
         });
 
         await RecalculateTransportCostsAsync();
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.leasingTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.leasingContract", GetTransportVehicle(vehicleId).Name));
     }
 
     public async Task AddTransportVehicleAsync(
@@ -374,23 +502,27 @@ public sealed class ApplicationState
         }
 
         Data.TransportVehicles.Add(vehicle);
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.vehiclesTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.vehicle", vehicle.Name));
     }
 
-    public async Task AddSavingsAccountAsync(SavingsAccountType accountType, string providerName, string accountName, decimal openingBalance)
+    public async Task AddSavingsAccountAsync(SavingsAccountType accountType, string providerName, string accountName, decimal openingBalance, DateOnly startDate)
     {
         var account = new SavingsAccount
         {
             AccountType = accountType,
             ProviderName = providerName.Trim(),
             AccountName = accountName.Trim(),
-            CreatedDate = DateOnly.FromDateTime(DateTime.Today),
-            OpeningBalance = openingBalance,
-            CurrentBalance = openingBalance
+            CreatedDate = NormalizeMonth(startDate),
+            OpeningBalance = openingBalance
         };
 
         Data.SavingsAccounts.Add(account);
-        await PersistAndNotifyAsync();
+        SetMonthlyBalance(account.Id, NormalizeMonth(account.CreatedDate), openingBalance);
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(accountType)),
+            BuildLogActivity("log.verb.added", "log.entity.savingsAccount", accountName));
     }
 
     public async Task AddSavingsReturnPeriodAsync(Guid accountId, DateOnly startDate, DateOnly endDate, decimal ratePercent, decimal taxPercent)
@@ -420,7 +552,10 @@ public sealed class ApplicationState
             TaxPercent = account.AccountType == SavingsAccountType.Bank ? taxPercent : 0m
         });
 
-        await RecalculateSavingsBalancesAsync();
+        await RecalculateSavingsAccountBalancesAsync(accountId, NormalizeMonth(startDate));
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(account.AccountType)),
+            BuildLogActivity("log.verb.added", "log.entity.savingsPeriod", account.AccountName));
     }
 
     public async Task AddSavingsDepositAsync(Guid accountId, DateOnly date, decimal amount)
@@ -431,9 +566,17 @@ public sealed class ApplicationState
             throw new InvalidOperationException("Deposit amount must be greater than zero.");
         }
 
+        if (NormalizeMonth(date) < NormalizeMonth(account.CreatedDate))
+        {
+            throw new InvalidOperationException("Deposit date cannot be earlier than the account start month.");
+        }
+
         Data.ExpenseRecords.Add(CreateSavingsDepositExpenseEntry(account, date, amount));
 
-        await RecalculateSavingsBalancesAsync();
+        await RecalculateSavingsAccountBalancesAsync(account.Id, NormalizeMonth(date));
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(account.AccountType)),
+            BuildLogActivity("log.verb.registered", "log.entity.deposit", account.AccountName));
     }
 
     public async Task AddSavingsWithdrawalAsync(Guid accountId, DateOnly date, decimal amount)
@@ -442,6 +585,11 @@ public sealed class ApplicationState
         if (amount <= 0m)
         {
             throw new InvalidOperationException("Withdrawal amount must be greater than zero.");
+        }
+
+        if (NormalizeMonth(date) < NormalizeMonth(account.CreatedDate))
+        {
+            throw new InvalidOperationException("Withdrawal date cannot be earlier than the account start month.");
         }
 
         var balanceBeforeWithdrawal = GetSavingsBalanceBeforeOrAtMonth(account.Id, NormalizeMonth(date));
@@ -460,7 +608,10 @@ public sealed class ApplicationState
             account.Id,
             null));
 
-        await RecalculateSavingsBalancesAsync();
+        await RecalculateSavingsAccountBalancesAsync(account.Id, NormalizeMonth(date));
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(account.AccountType)),
+            BuildLogActivity("log.verb.registered", "log.entity.withdrawal", account.AccountName));
     }
 
     public async Task AddAssetAsync(
@@ -500,7 +651,9 @@ public sealed class ApplicationState
                 asset.Id));
         }
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.assets"]),
+            BuildLogActivity("log.verb.added", "log.entity.asset", asset.Name));
     }
 
     public async Task UpdateAssetAsync(
@@ -520,7 +673,9 @@ public sealed class ApplicationState
         asset.EstimatedSaleValue = estimatedSaleValue;
         asset.AcquisitionDate = acquisitionDate;
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.assets"]),
+            BuildLogActivity("log.verb.updated", "log.entity.asset", asset.Name));
     }
 
     public async Task SellAssetAsync(Guid assetId, DateOnly saleDate, decimal saleAmount, Guid? bankSavingsAccountId)
@@ -558,10 +713,15 @@ public sealed class ApplicationState
         if (bankSavingsAccountId.HasValue)
         {
             await RecalculateSavingsBalancesAsync();
+            await LogActivityAsync(
+                BuildLogDescription(_localizer["nav.assets"]),
+                BuildLogActivity("log.verb.updated", "log.entity.assetSale", asset.Name));
             return;
         }
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.assets"]),
+            BuildLogActivity("log.verb.updated", "log.entity.assetSale", asset.Name));
     }
 
     public async Task<int> CalculateSavingsReturnsAsync(DateOnly startDate, DateOnly endDate)
@@ -582,47 +742,50 @@ public sealed class ApplicationState
 
         foreach (var account in Data.SavingsAccounts.OrderBy(item => item.AccountType).ThenBy(item => item.AccountName))
         {
-            var balance = GetSavingsBalanceBeforeMonth(account.Id, normalizedStart);
-
-            foreach (var month in EnumerateMonths(normalizedStart.Year, normalizedStart.Month, normalizedEnd.Year, normalizedEnd.Month))
+            var createdMonth = NormalizeMonth(account.CreatedDate);
+            if (createdMonth > normalizedEnd)
             {
-                var monthDate = month.ToDateOnly();
-                if (NormalizeMonth(account.CreatedDate) > monthDate)
-                {
-                    continue;
-                }
-
-                balance += GetSavingsManualNetChangeForMonth(account.Id, monthDate);
-
-                var period = GetActiveSavingsReturnPeriods(account.Id, monthDate).FirstOrDefault();
-                if (period is null || balance <= 0m)
-                {
-                    continue;
-                }
-
-                var grossReturn = Math.Round(balance * ConvertPercentageToDecimal(period.RatePercent) / 12m, 2, MidpointRounding.AwayFromZero);
-                var netReturn = account.AccountType == SavingsAccountType.Bank
-                    ? Math.Round(grossReturn - (grossReturn * ConvertPercentageToDecimal(period.TaxPercent)), 2, MidpointRounding.AwayFromZero)
-                    : grossReturn;
-
-                if (netReturn == 0m)
-                {
-                    continue;
-                }
-
-                Data.SavingsGeneratedReturns.Add(new SavingsGeneratedReturn
-                {
-                    SavingsAccountId = account.Id,
-                    Year = month.Year,
-                    Month = month.Month,
-                    Amount = netReturn
-                });
-
-                balance += netReturn;
-                generatedCount++;
+                continue;
             }
 
-            RefreshSavingsAccountBalance(account.Id);
+            var accountStart = normalizedStart < createdMonth ? createdMonth : normalizedStart;
+            RemoveMonthlyBalancesFrom(account.Id, accountStart);
+
+            var balance = accountStart == createdMonth
+                ? account.OpeningBalance
+                : GetBalanceAtOrBeforeMonth(account.Id, accountStart.AddMonths(-1));
+
+            foreach (var month in EnumerateMonths(accountStart.Year, accountStart.Month, normalizedEnd.Year, normalizedEnd.Month))
+            {
+                var monthDate = month.ToDateOnly();
+                balance += GetSavingsManualNetChangeForMonth(account.Id, monthDate);
+                balance = Math.Max(0m, balance);
+
+                var period = GetActiveSavingsReturnPeriods(account.Id, monthDate).FirstOrDefault();
+                if (period is not null && balance > 0m)
+                {
+                    var grossReturn = Math.Round(balance * ConvertPercentageToDecimal(period.RatePercent) / 12m, 2, MidpointRounding.AwayFromZero);
+                    var netReturn = account.AccountType == SavingsAccountType.Bank
+                        ? Math.Round(grossReturn - (grossReturn * ConvertPercentageToDecimal(period.TaxPercent)), 2, MidpointRounding.AwayFromZero)
+                        : grossReturn;
+
+                    if (netReturn != 0m)
+                    {
+                        Data.SavingsGeneratedReturns.Add(new SavingsGeneratedReturn
+                        {
+                            SavingsAccountId = account.Id,
+                            Year = month.Year,
+                            Month = month.Month,
+                            Amount = netReturn
+                        });
+
+                        balance += netReturn;
+                        generatedCount++;
+                    }
+                }
+
+                SetMonthlyBalance(account.Id, monthDate, balance);
+            }
         }
 
         await PersistAndNotifyAsync();
@@ -633,19 +796,23 @@ public sealed class ApplicationState
     {
         ValidateCreditValues(creditLimit, remainingDebt, monthlyInterestRate);
 
-        Data.Credits.Add(new Credit
+        var credit = new Credit
         {
             Name = name.Trim(),
             Provider = provider.Trim(),
             StartDate = startDate,
             CreditLimit = creditLimit,
             StartingRemainingDebt = remainingDebt,
-            RemainingDebt = remainingDebt,
             MonthlyInterestRate = monthlyInterestRate,
             ResetAtEndOfMonth = resetAtEndOfMonth
-        });
+        };
 
-        await PersistAndNotifyAsync();
+        Data.Credits.Add(credit);
+        SetMonthlyBalance(credit.Id, NormalizeMonth(startDate), remainingDebt);
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.credits"], _localizer["credits.manageTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.credit", name));
     }
 
     public async Task SaveHomeResidenceAsync(HomeResidenceType residenceType, int? purchaseYear, decimal? purchasePrice, decimal? currentMarketValue)
@@ -665,7 +832,9 @@ public sealed class ApplicationState
 
         SyncHomeResidenceAsset();
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.housingTab"], _localizer["housing.homeResidence"]),
+            BuildLogActivity("log.verb.saved", "log.entity.home", _localizer[$"housing.residenceType.{residenceType}"]));
     }
 
     public async Task AddCreditPurchaseAsync(Guid creditId, DateOnly purchaseDate, decimal amount, ExpenseCategory category, string subcategory)
@@ -676,7 +845,9 @@ public sealed class ApplicationState
             throw new InvalidOperationException("Purchase amount must be greater than zero.");
         }
 
-        if (credit.RemainingDebt + amount > credit.CreditLimit)
+        var month = NormalizeMonth(purchaseDate);
+        var debtBeforePurchase = GetCreditBalanceBeforeOrAtMonth(credit.Id, month);
+        if (debtBeforePurchase + amount > credit.CreditLimit)
         {
             throw new InvalidOperationException("The purchase would exceed the credit limit.");
         }
@@ -695,29 +866,36 @@ public sealed class ApplicationState
             CreditCostSource = CreditCostSource.ManualPurchase
         });
 
-        credit.RemainingDebt += amount;
-        await PersistAndNotifyAsync();
+        await RecalculateCreditBalancesAsync(credit.Id, month);
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.credits"], _localizer["credits.manageTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.creditPurchase", credit.Name));
     }
 
     public async Task PostCreditMonthAsync(Guid creditId, DateOnly month, decimal amortizationAmount, bool payFullAmount)
     {
         var credit = GetCredit(creditId);
-        var amountToPost = payFullAmount ? credit.RemainingDebt : Math.Min(amortizationAmount, credit.RemainingDebt);
+        var normalizedMonth = NormalizeMonth(month);
+        if (IsCreditMonthPosted(credit.Id, normalizedMonth))
+        {
+            throw new InvalidOperationException("The credit month has already been posted.");
+        }
+
+        var currentDebt = GetCreditBalanceBeforeOrAtMonth(credit.Id, normalizedMonth);
+        var amountToPost = payFullAmount ? currentDebt : Math.Min(amortizationAmount, currentDebt);
 
         if (amortizationAmount < 0m)
         {
             throw new InvalidOperationException("Amortization amount must not be negative.");
         }
 
-        if (amortizationAmount > credit.RemainingDebt && !payFullAmount)
+        if (amortizationAmount > currentDebt && !payFullAmount)
         {
             throw new InvalidOperationException("Amortization amount cannot exceed the remaining debt.");
         }
 
         if (amountToPost > 0m)
         {
-            credit.RemainingDebt = Math.Max(0m, credit.RemainingDebt - amountToPost);
-
             Data.ExpenseRecords.Add(new ExpenseEntry
             {
                 Amount = amountToPost,
@@ -725,15 +903,16 @@ public sealed class ApplicationState
                 Month = month.Month,
                 Category = ExpenseCategory.Credits,
                 Subcategory = $"{credit.Name} - {AmortizationSubcategory}",
-                Description = $"{credit.Name} - {AmortizationSubcategory}",
+                Description = string.Empty,
                 CreditId = credit.Id,
                 CreditCostSource = CreditCostSource.ManualAmortization
             });
         }
 
-        if (credit.RemainingDebt > 0m && credit.MonthlyInterestRate > 0m)
+        var debtAfterAmortization = Math.Max(0m, currentDebt - amountToPost);
+        if (debtAfterAmortization > 0m && credit.MonthlyInterestRate > 0m)
         {
-            var interestAmount = Math.Round(credit.RemainingDebt * ConvertPercentageToDecimal(credit.MonthlyInterestRate) / 12m, 2, MidpointRounding.AwayFromZero);
+            var interestAmount = Math.Round(debtAfterAmortization * ConvertPercentageToDecimal(credit.MonthlyInterestRate) / 12m, 2, MidpointRounding.AwayFromZero);
             if (interestAmount > 0m)
             {
                 Data.ExpenseRecords.Add(new ExpenseEntry
@@ -743,79 +922,22 @@ public sealed class ApplicationState
                     Month = month.Month,
                     Category = ExpenseCategory.Credits,
                     Subcategory = $"{credit.Name} - {InterestSubcategory}",
-                    Description = $"{credit.Name} - {InterestSubcategory}",
+                    Description = string.Empty,
                     CreditId = credit.Id,
                     CreditCostSource = CreditCostSource.GeneratedInterest
                 });
-
-                credit.RemainingDebt += interestAmount;
             }
         }
 
-        await PersistAndNotifyAsync();
+        await RecalculateCreditBalancesAsync(credit.Id, normalizedMonth);
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.credits"], _localizer["credits.manageTab"]),
+            BuildLogActivity("log.verb.posted", "log.entity.creditMonth", credit.Name));
     }
 
     public async Task<int> CalculateHousingLoanCostsAsync(DateOnly startDate, DateOnly endDate)
     {
-        var normalizedStart = NormalizeMonth(startDate);
-        var normalizedEnd = NormalizeMonth(endDate);
-
-        if (normalizedEnd < normalizedStart)
-        {
-            (normalizedStart, normalizedEnd) = (normalizedEnd, normalizedStart);
-        }
-
-        RemoveGeneratedExpensesInRange(ExpenseCategory.Housing, normalizedStart, normalizedEnd, includeLeasing: false);
-
-        var generatedCount = 0;
-
-        foreach (var loan in Data.HousingLoans)
-        {
-            var debtForMonth = GetOpeningDebtForLoan(loan.Id, loan.StartingRemainingDebt, ExpenseCategory.Housing, normalizedStart);
-
-            foreach (var month in EnumerateMonths(normalizedStart.Year, normalizedStart.Month, normalizedEnd.Year, normalizedEnd.Month))
-            {
-                var monthDate = month.ToDateOnly();
-
-                foreach (var period in GetActiveLoanInterestBindingPeriods(loan.Id, monthDate))
-                {
-                    var monthlyInterestCost = Math.Round(debtForMonth * ConvertPercentageToDecimal(period.InterestRate) / 12m, 2, MidpointRounding.AwayFromZero);
-                    Data.ExpenseRecords.Add(CreateLoanExpenseEntry(
-                        loan.Id,
-                        loan.Lender,
-                        ExpenseCategory.Housing,
-                        month,
-                        InterestSubcategory,
-                        monthlyInterestCost,
-                        period.Id,
-                        null,
-                        null,
-                        null));
-                    generatedCount++;
-                }
-
-                foreach (var plan in GetActiveLoanAmortizationPlans(loan.Id, monthDate))
-                {
-                    var amortizationAmount = Math.Min(debtForMonth, plan.MonthlyAmortizationAmount);
-                    Data.ExpenseRecords.Add(CreateLoanExpenseEntry(
-                        loan.Id,
-                        loan.Lender,
-                        ExpenseCategory.Housing,
-                        month,
-                        AmortizationSubcategory,
-                        amortizationAmount,
-                        null,
-                        plan.Id,
-                        null,
-                        null));
-
-                    debtForMonth = Math.Max(0m, debtForMonth - amortizationAmount);
-                    generatedCount++;
-                }
-            }
-
-            RefreshLoanDerivedValues(loan.Id);
-        }
+        var generatedCount = RecalculateLoanBalances(ExpenseCategory.Housing, Data.HousingLoans, startDate, endDate, loan => loan.Id, loan => loan.Lender, _ => null);
 
         await PersistAndNotifyAsync();
         return generatedCount;
@@ -823,65 +945,20 @@ public sealed class ApplicationState
 
     public async Task<int> CalculateTransportCostsAsync(DateOnly startDate, DateOnly endDate)
     {
+        var generatedCount = RecalculateLoanBalances(
+            ExpenseCategory.Transport,
+            Data.TransportLoans,
+            startDate,
+            endDate,
+            loan => loan.Id,
+            loan => loan.Lender,
+            loan => loan.VehicleId);
+
         var normalizedStart = NormalizeMonth(startDate);
         var normalizedEnd = NormalizeMonth(endDate);
-
         if (normalizedEnd < normalizedStart)
         {
             (normalizedStart, normalizedEnd) = (normalizedEnd, normalizedStart);
-        }
-
-        RemoveGeneratedExpensesInRange(ExpenseCategory.Transport, normalizedStart, normalizedEnd, includeLeasing: true);
-
-        var generatedCount = 0;
-
-        foreach (var loan in Data.TransportLoans)
-        {
-            var debtForMonth = GetOpeningDebtForLoan(loan.Id, loan.StartingRemainingDebt, ExpenseCategory.Transport, normalizedStart);
-            var vehicleMetadata = GetTransportVehicleName(loan.VehicleId);
-
-            foreach (var month in EnumerateMonths(normalizedStart.Year, normalizedStart.Month, normalizedEnd.Year, normalizedEnd.Month))
-            {
-                var monthDate = month.ToDateOnly();
-
-                foreach (var period in GetActiveLoanInterestBindingPeriods(loan.Id, monthDate))
-                {
-                    var monthlyInterestCost = Math.Round(debtForMonth * ConvertPercentageToDecimal(period.InterestRate) / 12m, 2, MidpointRounding.AwayFromZero);
-                    Data.ExpenseRecords.Add(CreateLoanExpenseEntry(
-                        loan.Id,
-                        loan.Lender,
-                        ExpenseCategory.Transport,
-                        month,
-                        InterestSubcategory,
-                        monthlyInterestCost,
-                        period.Id,
-                        null,
-                        vehicleMetadata,
-                        loan.VehicleId));
-                    generatedCount++;
-                }
-
-                foreach (var plan in GetActiveLoanAmortizationPlans(loan.Id, monthDate))
-                {
-                    var amortizationAmount = Math.Min(debtForMonth, plan.MonthlyAmortizationAmount);
-                    Data.ExpenseRecords.Add(CreateLoanExpenseEntry(
-                        loan.Id,
-                        loan.Lender,
-                        ExpenseCategory.Transport,
-                        month,
-                        AmortizationSubcategory,
-                        amortizationAmount,
-                        null,
-                        plan.Id,
-                        vehicleMetadata,
-                        loan.VehicleId));
-
-                    debtForMonth = Math.Max(0m, debtForMonth - amortizationAmount);
-                    generatedCount++;
-                }
-            }
-
-            RefreshTransportLoanDerivedValues(loan.Id);
         }
 
         foreach (var month in EnumerateMonths(normalizedStart.Year, normalizedStart.Month, normalizedEnd.Year, normalizedEnd.Month))
@@ -899,7 +976,7 @@ public sealed class ApplicationState
                     Category = ExpenseCategory.Transport,
                     Subcategory = LeasingSubcategory,
                     Metadata = vehicleMetadata,
-                    Description = LeasingSubcategory,
+                    Description = string.Empty,
                     TransportLeasingContractId = contract.Id,
                     TransportVehicleId = contract.VehicleId
                 });
@@ -927,14 +1004,34 @@ public sealed class ApplicationState
 
         foreach (var credit in Data.Credits.OrderBy(item => item.StartDate).ThenBy(item => item.Provider))
         {
+            var balance = GetBalanceAtOrBeforeMonth(credit.Id, normalizedStart.AddMonths(-1));
+
             foreach (var month in EnumerateMonths(normalizedStart.Year, normalizedStart.Month, normalizedEnd.Year, normalizedEnd.Month))
             {
                 var monthDate = month.ToDateOnly();
-                var debtForMonth = GetCreditDebtBeforeResetForMonth(credit, monthDate);
-
-                if (debtForMonth > 0m && credit.MonthlyInterestRate > 0m)
+                if (NormalizeMonth(credit.StartDate) > monthDate)
                 {
-                    var interestAmount = Math.Round(debtForMonth * ConvertPercentageToDecimal(credit.MonthlyInterestRate) / 12m, 2, MidpointRounding.AwayFromZero);
+                    continue;
+                }
+
+                balance += Data.ExpenseRecords
+                    .Where(expense =>
+                        expense.CreditId == credit.Id &&
+                        NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == monthDate &&
+                        expense.CreditCostSource == CreditCostSource.ManualPurchase)
+                    .Sum(expense => expense.Amount);
+
+                balance -= Data.ExpenseRecords
+                    .Where(expense =>
+                        expense.CreditId == credit.Id &&
+                        NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == monthDate &&
+                        expense.CreditCostSource == CreditCostSource.ManualAmortization)
+                    .Sum(expense => expense.Amount);
+                balance = Math.Max(0m, balance);
+
+                if (balance > 0m && credit.MonthlyInterestRate > 0m)
+                {
+                    var interestAmount = Math.Round(balance * ConvertPercentageToDecimal(credit.MonthlyInterestRate) / 12m, 2, MidpointRounding.AwayFromZero);
                     if (interestAmount > 0m)
                     {
                         Data.ExpenseRecords.Add(new ExpenseEntry
@@ -944,31 +1041,34 @@ public sealed class ApplicationState
                             Month = month.Month,
                             Category = ExpenseCategory.Credits,
                             Subcategory = InterestSubcategory,
-                            Description = $"{credit.Provider.Trim()} {InterestSubcategory}",
+                            Description = string.Empty,
                             CreditId = credit.Id,
                             CreditCostSource = CreditCostSource.GeneratedInterest
                         });
 
-                        debtForMonth += interestAmount;
+                        balance += interestAmount;
                         generatedCount++;
                     }
                 }
 
-                if (credit.ResetAtEndOfMonth && debtForMonth > 0m)
+                if (credit.ResetAtEndOfMonth && balance > 0m)
                 {
                     Data.ExpenseRecords.Add(new ExpenseEntry
                     {
-                        Amount = debtForMonth,
+                        Amount = balance,
                         Year = month.Year,
                         Month = month.Month,
                         Category = ExpenseCategory.Credits,
                         Subcategory = AmortizationSubcategory,
-                        Description = $"{credit.Provider.Trim()} {AmortizationSubcategory}",
+                        Description = string.Empty,
                         CreditId = credit.Id,
                         CreditCostSource = CreditCostSource.GeneratedResetAmortization
                     });
+                    balance = 0m;
                     generatedCount++;
                 }
+
+                SetMonthlyBalance(credit.Id, monthDate, balance);
             }
 
             RefreshCreditDerivedValues(credit.Id);
@@ -989,6 +1089,20 @@ public sealed class ApplicationState
         if (Data.TransportLoans.Any(loan => loan.Id == loanId))
         {
             await RecalculateTransportCostsAsync();
+        }
+    }
+
+    private async Task CalculateLoanCategoryCostsAsync(Guid loanId, DateOnly startDate, DateOnly endDate)
+    {
+        if (Data.HousingLoans.Any(loan => loan.Id == loanId))
+        {
+            await CalculateHousingLoanCostsAsync(startDate, endDate);
+            return;
+        }
+
+        if (Data.TransportLoans.Any(loan => loan.Id == loanId))
+        {
+            await CalculateTransportCostsAsync(startDate, endDate);
         }
     }
 
@@ -1145,6 +1259,26 @@ public sealed class ApplicationState
             : $"{metadata} - {subcategory}";
     }
 
+    public string GetExpenseDescriptionDisplay(ExpenseEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return string.IsNullOrWhiteSpace(entry.Description) || PreferSystemExpenseLabel(entry)
+            ? GetExpenseSubcategoryDisplay(entry)
+            : entry.Description.Trim();
+    }
+
+    public IReadOnlyList<string> GetExpenseSubcategorySuggestions(ExpenseCategory category) =>
+        Data.ExpenseRecords
+            .Where(record => record.Category == category && !string.IsNullOrWhiteSpace(record.Subcategory))
+            .Select(record => record.Subcategory.Trim())
+            .Concat(Data.Subscriptions
+                .Where(record => record.Category == category && !string.IsNullOrWhiteSpace(record.Subcategory))
+                .Select(record => record.Subcategory.Trim()))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value)
+            .ToList();
+
     public string GetExpenseLabelDisplay(string subcategory) => GetLocalizedExpenseLabel(subcategory);
 
     public bool PreferSystemExpenseLabel(ExpenseEntry entry)
@@ -1261,8 +1395,8 @@ public sealed class ApplicationState
 
     public IReadOnlyList<MonthlyReportRow> GetMonthlyReportRows()
     {
-        var currentMonth = GetCurrentMonth().ToDateOnly();
-        return GetMonthlyReportRows(currentMonth.AddMonths(-11), currentMonth);
+        var (startDate, endDate) = GetDefaultMonthlyReportRange();
+        return GetMonthlyReportRows(startDate, endDate);
     }
 
     public IReadOnlyList<MonthlyReportRow> GetMonthlyReportRows(DateOnly startDate, DateOnly endDate)
@@ -1281,7 +1415,6 @@ public sealed class ApplicationState
             months.Add(GetCurrentMonth());
         }
 
-        var balance = 0m;
         var rows = new List<MonthlyReportRow>();
 
         foreach (var month in months)
@@ -1294,7 +1427,7 @@ public sealed class ApplicationState
             var savings = GetSavingsForMonth(monthDate);
             var interest = GetInterestIncomeForMonth(monthDate) - GetInterestCostsForMonth(month.Year, month.Month);
             var amortization = GetAmortizationCostsForMonth(month.Year, month.Month);
-            balance = CalculateBalanceForMonth(monthDate);
+            var balance = income - expenses;
 
             rows.Add(new MonthlyReportRow
             {
@@ -1370,16 +1503,49 @@ public sealed class ApplicationState
 
     public async Task SetThemeModeAsync(string themeMode)
     {
-        var normalizedThemeMode = themeMode.Trim();
-        var supportedThemeModes = new[] { "Primary", "Secondary", "Tertiary", "Dark" };
+        Data.ThemeMode = AppThemeNames.Normalize(themeMode);
+        await PersistAndNotifyAsync();
+    }
 
-        if (!supportedThemeModes.Contains(normalizedThemeMode, StringComparer.OrdinalIgnoreCase))
+    public async Task SetUpcomingExpensesPreferencesAsync(int months, decimal? minimumAmount)
+    {
+        Data.UpcomingExpensesMonths = months;
+        Data.UpcomingExpensesMinimumAmount = minimumAmount.HasValue && minimumAmount.Value > 0m
+            ? minimumAmount.Value
+            : null;
+
+        NormalizeUpcomingExpensesPreferences();
+        await PersistAndNotifyAsync();
+    }
+
+    public async Task<DataPruningSummary> PruneDataAsync(DateOnly cutoffDate)
+    {
+        var summary = _dataPruningService.Prune(Data, cutoffDate);
+        await PersistAndNotifyAsync();
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.settings"], _localizer["settings.tab.data"]),
+            BuildLogActivity("log.verb.pruned", "log.entity.data", cutoffDate.ToString("yyyy-MM-dd")));
+        return summary;
+    }
+
+    public async Task<bool> UndoLastChangeAsync()
+    {
+        var snapshotJson = _undoService.ConsumeUndoSnapshot();
+        if (string.IsNullOrWhiteSpace(snapshotJson))
         {
-            return;
+            return false;
         }
 
-        Data.ThemeMode = supportedThemeModes.First(mode => mode.Equals(normalizedThemeMode, StringComparison.OrdinalIgnoreCase));
-        await PersistAndNotifyAsync();
+        var restoredData = _localStorageService.Deserialize<ApplicationData>(snapshotJson);
+        if (restoredData is null)
+        {
+            return false;
+        }
+
+        Data = restoredData;
+        NormalizeData();
+        await PersistAndNotifyAsync(captureUndoSnapshot: false);
+        return true;
     }
 
     public async Task RemoveExpenseAsync(Guid expenseId)
@@ -1395,6 +1561,9 @@ public sealed class ApplicationState
         if (expense.SavingsAccountId.HasValue)
         {
             await RecalculateSavingsBalancesAsync();
+            await LogActivityAsync(
+                BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
+                BuildLogActivity("log.verb.deleted", "log.entity.expense", GetExpenseActivitySubject(expense.Subcategory, GetExpenseDescriptionDisplay(expense))));
             return;
         }
 
@@ -1403,32 +1572,47 @@ public sealed class ApplicationState
 
     public async Task RemoveSubscriptionAsync(Guid subscriptionId)
     {
-        Data.Subscriptions.RemoveAll(subscription => subscription.Id == subscriptionId);
+        var subscription = Data.Subscriptions.FirstOrDefault(item => item.Id == subscriptionId);
+        Data.Subscriptions.RemoveAll(item => item.Id == subscriptionId);
         Data.ExpenseRecords.RemoveAll(expense => expense.SubscriptionDefinitionId == subscriptionId);
         await RegenerateSubscriptionExpensesAsync();
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.subscriptionAndDefinitions"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.recurringExpense", subscription?.Name ?? subscriptionId.ToString()));
     }
 
     public async Task RemoveHousingDefinitionAsync(Guid definitionId)
     {
-        Data.HousingDefinitions.RemoveAll(definition => definition.Id == definitionId);
+        var definition = Data.HousingDefinitions.FirstOrDefault(item => item.Id == definitionId);
+        Data.HousingDefinitions.RemoveAll(item => item.Id == definitionId);
         Data.ExpenseRecords.RemoveAll(expense => expense.HousingDefinitionId == definitionId);
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.housingTab"], _localizer["housing.recurringCostsTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.housingDefinition", definition?.Description ?? definitionId.ToString()));
     }
 
     public async Task RemoveTransportDefinitionAsync(Guid definitionId)
     {
-        Data.TransportDefinitions.RemoveAll(definition => definition.Id == definitionId);
+        var definition = Data.TransportDefinitions.FirstOrDefault(item => item.Id == definitionId);
+        Data.TransportDefinitions.RemoveAll(item => item.Id == definitionId);
         Data.ExpenseRecords.RemoveAll(expense => expense.TransportDefinitionId == definitionId);
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.recurringCostsTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.transportDefinition", definition?.Subcategory ?? definitionId.ToString()));
     }
 
     public async Task RemoveHousingLoanAsync(Guid loanId)
     {
-        Data.HousingLoans.RemoveAll(loan => loan.Id == loanId);
+        var loan = Data.HousingLoans.FirstOrDefault(item => item.Id == loanId);
+        Data.HousingLoans.RemoveAll(item => item.Id == loanId);
         Data.LoanInterestBindingPeriods.RemoveAll(period => period.LoanId == loanId);
         Data.LoanAmortizationPlans.RemoveAll(plan => plan.LoanId == loanId);
         Data.ExpenseRecords.RemoveAll(expense => expense.LoanId == loanId);
+        RemoveAllMonthlyBalances(loanId);
         await RecalculateHousingLoanCostsAsync();
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.housingTab"], _localizer["housing.loansTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.housingLoan", loan?.Name ?? loanId.ToString()));
     }
 
     public async Task RemoveLoanInterestBindingPeriodAsync(Guid periodId)
@@ -1440,8 +1624,12 @@ public sealed class ApplicationState
         }
 
         Data.LoanInterestBindingPeriods.RemoveAll(item => item.Id == periodId);
-        Data.ExpenseRecords.RemoveAll(expense => expense.LoanInterestBindingPeriodId == periodId);
         await RecalculateLoanCategoryCostsAsync(period.LoanId);
+        await LogActivityAsync(
+            BuildLogDescription(
+                Data.HousingLoans.Any(loan => loan.Id == period.LoanId) ? _localizer["nav.housingTab"] : _localizer["nav.transport"],
+                Data.HousingLoans.Any(loan => loan.Id == period.LoanId) ? _localizer["housing.loansTab"] : _localizer["transport.loansTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.bindingPeriod", FormatMonthRange(period.StartMonth, period.EndMonth)));
     }
 
     public async Task RemoveLoanAmortizationPlanAsync(Guid planId)
@@ -1455,22 +1643,36 @@ public sealed class ApplicationState
         Data.LoanAmortizationPlans.RemoveAll(item => item.Id == planId);
         Data.ExpenseRecords.RemoveAll(expense => expense.LoanAmortizationPlanId == planId);
         await RecalculateLoanCategoryCostsAsync(plan.LoanId);
+        await LogActivityAsync(
+            BuildLogDescription(
+                Data.HousingLoans.Any(loan => loan.Id == plan.LoanId) ? _localizer["nav.housingTab"] : _localizer["nav.transport"],
+                Data.HousingLoans.Any(loan => loan.Id == plan.LoanId) ? _localizer["housing.loansTab"] : _localizer["transport.loansTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.amortizationPlan", FormatMonthRange(plan.StartDate, plan.EndDate)));
     }
 
     public async Task RemoveTransportLoanAsync(Guid loanId)
     {
-        Data.TransportLoans.RemoveAll(loan => loan.Id == loanId);
+        var loan = Data.TransportLoans.FirstOrDefault(item => item.Id == loanId);
+        Data.TransportLoans.RemoveAll(item => item.Id == loanId);
         Data.LoanInterestBindingPeriods.RemoveAll(period => period.LoanId == loanId);
         Data.LoanAmortizationPlans.RemoveAll(plan => plan.LoanId == loanId);
         Data.ExpenseRecords.RemoveAll(expense => expense.LoanId == loanId && expense.Category == ExpenseCategory.Transport);
+        RemoveAllMonthlyBalances(loanId);
         await RecalculateTransportCostsAsync();
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.loansTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.transportLoan", loan?.Lender ?? loanId.ToString()));
     }
 
     public async Task RemoveTransportLeasingContractAsync(Guid contractId)
     {
-        Data.TransportLeasingContracts.RemoveAll(contract => contract.Id == contractId);
+        var contract = Data.TransportLeasingContracts.FirstOrDefault(item => item.Id == contractId);
+        Data.TransportLeasingContracts.RemoveAll(item => item.Id == contractId);
         Data.ExpenseRecords.RemoveAll(expense => expense.TransportLeasingContractId == contractId);
         await RecalculateTransportCostsAsync();
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.leasingTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.leasingContract", contract?.Id.ToString() ?? contractId.ToString()));
     }
 
     public async Task RemoveTransportVehicleAsync(Guid vehicleId)
@@ -1497,24 +1699,38 @@ public sealed class ApplicationState
             (vehicle.AssetId.HasValue && asset.Id == vehicle.AssetId.Value));
 
         Data.TransportVehicles.RemoveAll(item => item.Id == vehicleId);
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.vehiclesTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.vehicle", vehicle.Name));
     }
 
     public async Task RemoveCreditAsync(Guid creditId)
     {
-        Data.Credits.RemoveAll(credit => credit.Id == creditId);
+        var credit = Data.Credits.FirstOrDefault(item => item.Id == creditId);
+        Data.Credits.RemoveAll(item => item.Id == creditId);
         Data.ExpenseRecords.RemoveAll(expense => expense.CreditId == creditId);
-        await PersistAndNotifyAsync();
+        RemoveAllMonthlyBalances(creditId);
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.credits"], _localizer["credits.manageTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.credit", credit?.Name ?? creditId.ToString()));
     }
 
     public async Task RemoveSavingsAccountAsync(Guid accountId)
     {
-        Data.SavingsAccounts.RemoveAll(account => account.Id == accountId);
+        var account = Data.SavingsAccounts.FirstOrDefault(item => item.Id == accountId);
+        Data.SavingsAccounts.RemoveAll(item => item.Id == accountId);
         Data.SavingsReturnPeriods.RemoveAll(period => period.SavingsAccountId == accountId);
         Data.SavingsGeneratedReturns.RemoveAll(item => item.SavingsAccountId == accountId);
         Data.ExpenseRecords.RemoveAll(expense => expense.SavingsAccountId == accountId);
         Data.IncomeRecords.RemoveAll(income => income.SavingsAccountId == accountId);
+        RemoveAllMonthlyBalances(accountId);
         await RecalculateSavingsBalancesAsync();
+        if (account is not null)
+        {
+            await LogActivityAsync(
+                BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(account.AccountType)),
+                BuildLogActivity("log.verb.deleted", "log.entity.savingsAccount", account.AccountName));
+        }
     }
 
     public async Task RemoveSavingsReturnPeriodAsync(Guid periodId)
@@ -1527,6 +1743,10 @@ public sealed class ApplicationState
 
         Data.SavingsReturnPeriods.RemoveAll(item => item.Id == periodId);
         await RecalculateSavingsBalancesAsync();
+        var account = GetSavingsAccount(period.SavingsAccountId);
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(account.AccountType)),
+            BuildLogActivity("log.verb.deleted", "log.entity.savingsPeriod", account.AccountName));
     }
 
     public async Task RemoveIncomeAsync(Guid incomeId, bool removeSeries)
@@ -1537,22 +1757,76 @@ public sealed class ApplicationState
             return;
         }
 
+        var activity = removeSeries && income.SeriesId.HasValue
+            ? BuildLogActivity("log.verb.deleted", "log.entity.incomeSeries", BuildIncomeLogSubject(income.MemberId, income.Type))
+            : BuildLogActivity("log.verb.deleted", "log.entity.income", BuildIncomeLogSubject(income.MemberId, income.Type));
+
         if (removeSeries && income.SeriesId.HasValue)
         {
             Data.IncomeRecords.RemoveAll(entry => entry.SeriesId == income.SeriesId);
+            Data.SalaryIncomePeriods.RemoveAll(period => period.SeriesId == income.SeriesId.Value);
         }
         else
         {
             Data.IncomeRecords.RemoveAll(entry => entry.Id == incomeId);
         }
 
+        if (income.SeriesId.HasValue && !Data.IncomeRecords.Any(entry => entry.SeriesId == income.SeriesId))
+        {
+            Data.SalaryIncomePeriods.RemoveAll(period => period.SeriesId == income.SeriesId.Value);
+        }
+
         if (income.SavingsAccountId.HasValue)
         {
             await RecalculateSavingsBalancesAsync();
+            await LogActivityAsync(
+                BuildLogDescription(_localizer["nav.household"], _localizer["household.incomesTab"]),
+                activity);
             return;
         }
 
-        await PersistAndNotifyAsync();
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.incomesTab"]),
+            activity);
+    }
+
+    public IReadOnlyList<SalaryIncomePeriodDisplay> GetSalaryIncomePeriods()
+    {
+        return Data.SalaryIncomePeriods
+            .Select(period => new SalaryIncomePeriodDisplay
+            {
+                Id = period.Id,
+                SeriesId = period.SeriesId,
+                MemberId = period.MemberId,
+                MemberName = string.IsNullOrWhiteSpace(period.MemberName)
+                    ? GetMemberNameOrUnknown(period.MemberId)
+                    : period.MemberName.Trim(),
+                MonthlyAmount = period.MonthlyAmount,
+                StartYear = period.StartYear,
+                StartMonth = period.StartMonth,
+                EndYear = period.EndYear,
+                EndMonth = period.EndMonth
+            })
+            .OrderByDescending(period => period.StartYear)
+            .ThenByDescending(period => period.StartMonth)
+            .ThenBy(period => period.MemberName)
+            .ToList();
+    }
+
+    public async Task RemoveSalaryIncomePeriodAsync(Guid periodId)
+    {
+        var period = Data.SalaryIncomePeriods.FirstOrDefault(item => item.Id == periodId);
+        if (period is null)
+        {
+            return;
+        }
+
+        Data.SalaryIncomePeriods.RemoveAll(item => item.Id == periodId);
+        Data.IncomeRecords.RemoveAll(entry => entry.SeriesId == period.SeriesId);
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.salaryTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.salaryPeriod", period.MemberName));
     }
 
     private async Task RegenerateSubscriptionExpensesAsync()
@@ -1565,16 +1839,87 @@ public sealed class ApplicationState
         return amount.ToString("C", CreateNumberFormat());
     }
 
-    private async Task PersistAndNotifyAsync()
+    private async Task PersistAndNotifyAsync(bool captureUndoSnapshot = true)
     {
-        await _localStorageService.SaveAsync(ApplicationDataKey, Data);
+        if (captureUndoSnapshot)
+        {
+            _undoService.CaptureBeforeSave();
+        }
+
+        var json = _localStorageService.Serialize(Data);
+        await _localStorageService.SaveJsonAsync(ApplicationDataKey, json);
+        _undoService.CommitSavedState(json);
         Changed?.Invoke();
+    }
+
+    private async Task PersistAndNotifyAndLogAsync(string description, string activity)
+    {
+        await PersistAndNotifyAsync();
+        await LogActivityAsync(description, activity);
+    }
+
+    private async Task LogActivityAsync(string description, string activity)
+    {
+        await _applicationLogService.AddEntryAsync(description, activity, _localizer["log.status.ok"]);
+    }
+
+    private string BuildLogDescription(params string[] parts) =>
+        string.Join("-", parts.Where(part => !string.IsNullOrWhiteSpace(part)).Select(part => part.Trim()));
+
+    private string BuildLogActivity(string verbKey, string entityKey, string? subject = null)
+    {
+        var parts = new List<string>
+        {
+            _localizer[verbKey],
+            _localizer[entityKey]
+        };
+
+        if (!string.IsNullOrWhiteSpace(subject))
+        {
+            parts.Add(subject.Trim());
+        }
+
+        return string.Join(" ", parts);
+    }
+
+    private string BuildIncomeLogSubject(Guid memberId, string type) =>
+        $"{GetMemberNameOrUnknown(memberId)} / {GetIncomeTypeDisplay(type)}";
+
+    private string GetExpenseActivitySubject(string subcategory, string description) =>
+        string.IsNullOrWhiteSpace(description)
+            ? GetLocalizedExpenseLabel(subcategory)
+            : description.Trim();
+
+    private string FormatMonthRange(DateOnly startDate, DateOnly endDate) =>
+        $"{NormalizeMonth(startDate):yyyy-MM} - {NormalizeMonth(endDate):yyyy-MM}";
+
+    private string GetSavingsTabTitle(SavingsAccountType accountType) => accountType switch
+    {
+        SavingsAccountType.Bank => _localizer["savings.bankTab"],
+        SavingsAccountType.Fund => _localizer["savings.fundsTab"],
+        SavingsAccountType.Stock => _localizer["savings.stocksTab"],
+        _ => _localizer["savings.bankTab"]
+    };
+
+    private void NormalizeUpcomingExpensesPreferences()
+    {
+        Data.UpcomingExpensesMonths = Data.UpcomingExpensesMonths switch
+        {
+            1 or 3 or 6 or 12 or ApplicationData.UpcomingExpensesShowAllMonths => Data.UpcomingExpensesMonths,
+            _ => 3
+        };
+
+        if (Data.UpcomingExpensesMinimumAmount <= 0m)
+        {
+            Data.UpcomingExpensesMinimumAmount = null;
+        }
     }
 
     private void NormalizeData()
     {
         Data.Members ??= [];
         Data.IncomeRecords ??= [];
+        Data.SalaryIncomePeriods ??= [];
         Data.ExpenseRecords ??= [];
         Data.Subscriptions ??= [];
         Data.HousingDefinitions ??= [];
@@ -1585,6 +1930,7 @@ public sealed class ApplicationState
         Data.TransportLoans ??= [];
         Data.LoanInterestBindingPeriods ??= [];
         Data.LoanAmortizationPlans ??= [];
+        Data.MonthlyBalances ??= [];
         Data.TransportLeasingContracts ??= [];
         Data.Credits ??= [];
         Data.Debts ??= [];
@@ -1620,8 +1966,14 @@ public sealed class ApplicationState
 
         if (string.IsNullOrWhiteSpace(Data.ThemeMode))
         {
-            Data.ThemeMode = "Primary";
+            Data.ThemeMode = AppThemeNames.Standard;
         }
+        else
+        {
+            Data.ThemeMode = AppThemeNames.Normalize(Data.ThemeMode);
+        }
+
+        NormalizeUpcomingExpensesPreferences();
 
         foreach (var income in Data.IncomeRecords)
         {
@@ -1633,24 +1985,21 @@ public sealed class ApplicationState
             income.Metadata ??= string.Empty;
         }
 
+        foreach (var salaryPeriod in Data.SalaryIncomePeriods)
+        {
+            salaryPeriod.MemberName = string.IsNullOrWhiteSpace(salaryPeriod.MemberName)
+                ? GetMemberNameOrUnknown(salaryPeriod.MemberId)
+                : salaryPeriod.MemberName.Trim();
+        }
+
         foreach (var loan in Data.HousingLoans)
         {
             loan.Name = string.IsNullOrWhiteSpace(loan.Name) ? loan.Lender : loan.Name.Trim();
-            if (loan.RemainingDebt < 0m)
-            {
-                loan.RemainingDebt = 0m;
-            }
-
             RefreshLoanDerivedValues(loan.Id);
         }
 
         foreach (var loan in Data.TransportLoans)
         {
-            if (loan.RemainingDebt < 0m)
-            {
-                loan.RemainingDebt = 0m;
-            }
-
             RefreshTransportLoanDerivedValues(loan.Id);
         }
 
@@ -1707,11 +2056,6 @@ public sealed class ApplicationState
         foreach (var credit in Data.Credits)
         {
             credit.Name = string.IsNullOrWhiteSpace(credit.Name) ? credit.Provider : credit.Name.Trim();
-            if (credit.RemainingDebt < 0m)
-            {
-                credit.RemainingDebt = 0m;
-            }
-
             RefreshCreditDerivedValues(credit.Id);
         }
 
@@ -1721,9 +2065,266 @@ public sealed class ApplicationState
             {
                 account.AccountName = DefaultSavingsAccountName;
             }
-
-            RefreshSavingsAccountBalance(account.Id);
         }
+
+        MigrateLegacyLoanBindingPeriods();
+        RebuildMonthlyBalancesInMemory();
+    }
+
+    public decimal GetLoanCurrentBalance(Guid loanId) => GetCurrentOrLatestBalance(loanId);
+
+    public decimal GetCreditCurrentBalance(Guid creditId) => GetCurrentOrLatestBalance(creditId);
+
+    public decimal GetSavingsAccountCurrentBalance(Guid accountId) => GetCurrentOrLatestBalance(accountId);
+
+    public decimal GetCreditInterestCostsForMonth(DateOnly month)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        return Data.ExpenseRecords
+            .Where(expense =>
+                expense.CreditId.HasValue &&
+                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == normalizedMonth &&
+                expense.CreditCostSource == CreditCostSource.GeneratedInterest)
+            .Sum(expense => expense.Amount);
+    }
+
+    public IReadOnlyList<DateOnly> GetUnpostedCreditMonths(Guid creditId)
+    {
+        var credit = GetCredit(creditId);
+        var startMonth = NormalizeMonth(credit.StartDate);
+        var currentMonth = GetCurrentMonth().ToDateOnly();
+
+        return EnumerateMonths(startMonth.Year, startMonth.Month, currentMonth.Year, currentMonth.Month)
+            .Select(month => month.ToDateOnly())
+            .Where(month => !IsCreditMonthPosted(creditId, month))
+            .OrderBy(month => month)
+            .ToList();
+    }
+
+    public IReadOnlyList<MonthlyBalance> GetMonthlyBalances(Guid entityId) =>
+        Data.MonthlyBalances
+            .Where(item => item.EntityId == entityId)
+            .OrderByDescending(item => item.Year)
+            .ThenByDescending(item => item.Month)
+            .ToList();
+
+    private void MigrateLegacyLoanBindingPeriods()
+    {
+        foreach (var period in Data.LoanInterestBindingPeriods)
+        {
+            if (period.StartMonth == default)
+            {
+                var legacyStart = period.StartDate == default ? DateOnly.FromDateTime(DateTime.Today) : period.StartDate;
+                period.StartMonth = NormalizeMonth(legacyStart);
+            }
+
+            if (period.EndMonth == default)
+            {
+                var legacyEnd = period.EndDate == default ? period.StartMonth : period.EndDate;
+                period.EndMonth = NormalizeMonth(legacyEnd);
+            }
+
+            period.StartDate = period.StartMonth;
+            period.EndDate = period.EndMonth;
+        }
+    }
+
+    private void RebuildMonthlyBalancesInMemory()
+    {
+        Data.MonthlyBalances.RemoveAll(_ => true);
+
+        foreach (var loan in Data.HousingLoans)
+        {
+            SetMonthlyBalance(loan.Id, NormalizeMonth(loan.LoanStartDate), loan.StartingRemainingDebt);
+        }
+
+        foreach (var loan in Data.TransportLoans)
+        {
+            SetMonthlyBalance(loan.Id, NormalizeMonth(loan.LoanStartDate), loan.StartingRemainingDebt);
+        }
+
+        foreach (var credit in Data.Credits)
+        {
+            SetMonthlyBalance(credit.Id, NormalizeMonth(credit.StartDate), credit.StartingRemainingDebt);
+        }
+
+        foreach (var account in Data.SavingsAccounts)
+        {
+            SetMonthlyBalance(account.Id, NormalizeMonth(account.CreatedDate), account.OpeningBalance);
+        }
+
+        if (TryGetHousingLoanCalculationRange(out var housingStart, out var housingEnd))
+        {
+            _ = RecalculateLoanBalances(ExpenseCategory.Housing, Data.HousingLoans, housingStart, housingEnd, loan => loan.Id, loan => loan.Lender, _ => null);
+        }
+
+        if (TryGetTransportCalculationRange(out var transportStart, out var transportEnd))
+        {
+            _ = RecalculateLoanBalances(ExpenseCategory.Transport, Data.TransportLoans, transportStart, transportEnd, loan => loan.Id, loan => loan.Lender, loan => loan.VehicleId);
+        }
+
+        foreach (var credit in Data.Credits)
+        {
+            var start = NormalizeMonth(credit.StartDate);
+            RemoveMonthlyBalancesFrom(credit.Id, start);
+            var balance = credit.StartingRemainingDebt;
+            foreach (var month in EnumerateMonths(start.Year, start.Month, GetGenerationLimit().Year, GetGenerationLimit().Month))
+            {
+                var monthDate = month.ToDateOnly();
+                balance += Data.ExpenseRecords
+                    .Where(expense =>
+                        expense.CreditId == credit.Id &&
+                        NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == monthDate &&
+                        expense.CreditCostSource is CreditCostSource.ManualPurchase or CreditCostSource.GeneratedInterest)
+                    .Sum(expense => expense.Amount);
+                balance -= Data.ExpenseRecords
+                    .Where(expense =>
+                        expense.CreditId == credit.Id &&
+                        NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == monthDate &&
+                        expense.CreditCostSource is CreditCostSource.ManualAmortization or CreditCostSource.GeneratedResetAmortization)
+                    .Sum(expense => expense.Amount);
+                SetMonthlyBalance(credit.Id, monthDate, Math.Max(0m, balance));
+            }
+        }
+
+        foreach (var account in Data.SavingsAccounts)
+        {
+            var start = NormalizeMonth(account.CreatedDate);
+            RemoveMonthlyBalancesFrom(account.Id, start);
+            var balance = account.OpeningBalance;
+            foreach (var month in EnumerateMonths(start.Year, start.Month, GetGenerationLimit().Year, GetGenerationLimit().Month))
+            {
+                var monthDate = month.ToDateOnly();
+                balance += GetSavingsManualNetChangeForMonth(account.Id, monthDate);
+                balance += Data.SavingsGeneratedReturns
+                    .Where(item => item.SavingsAccountId == account.Id && item.Year == month.Year && item.Month == month.Month)
+                    .Sum(item => item.Amount);
+                SetMonthlyBalance(account.Id, monthDate, Math.Max(0m, balance));
+            }
+        }
+    }
+
+    private void SetMonthlyBalance(Guid entityId, DateOnly month, decimal balance)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        Data.MonthlyBalances.RemoveAll(item =>
+            item.EntityId == entityId &&
+            item.Year == normalizedMonth.Year &&
+            item.Month == normalizedMonth.Month);
+
+        Data.MonthlyBalances.Add(new MonthlyBalance
+        {
+            EntityId = entityId,
+            Year = normalizedMonth.Year,
+            Month = normalizedMonth.Month,
+            Balance = Math.Max(0m, balance)
+        });
+    }
+
+    private void RemoveMonthlyBalancesFrom(Guid entityId, DateOnly startMonth)
+    {
+        var normalizedMonth = NormalizeMonth(startMonth);
+        Data.MonthlyBalances.RemoveAll(item =>
+            item.EntityId == entityId &&
+            NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) >= normalizedMonth);
+    }
+
+    private void RemoveMonthlyBalancesInRange(Guid entityId, DateOnly startMonth, DateOnly endMonth)
+    {
+        var normalizedStart = NormalizeMonth(startMonth);
+        var normalizedEnd = NormalizeMonth(endMonth);
+        Data.MonthlyBalances.RemoveAll(item =>
+            item.EntityId == entityId &&
+            NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) >= normalizedStart &&
+            NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) <= normalizedEnd);
+    }
+
+    private void RemoveAllMonthlyBalances(Guid entityId)
+    {
+        Data.MonthlyBalances.RemoveAll(item => item.EntityId == entityId);
+    }
+
+    private decimal GetCurrentOrLatestBalance(Guid entityId)
+    {
+        var currentMonth = GetCurrentMonth().ToDateOnly();
+        var current = Data.MonthlyBalances.FirstOrDefault(item =>
+            item.EntityId == entityId &&
+            item.Year == currentMonth.Year &&
+            item.Month == currentMonth.Month);
+
+        if (current is not null)
+        {
+            return current.Balance;
+        }
+
+        return GetBalanceAtOrBeforeMonth(entityId, currentMonth);
+    }
+
+    private decimal GetBalanceAtOrBeforeMonth(Guid entityId, DateOnly month)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        return Data.MonthlyBalances
+            .Where(item =>
+                item.EntityId == entityId &&
+                NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) <= normalizedMonth)
+            .OrderByDescending(item => item.Year)
+            .ThenByDescending(item => item.Month)
+            .Select(item => item.Balance)
+            .FirstOrDefault();
+    }
+
+    private decimal GetBalanceAtMonth(Guid entityId, DateOnly month)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        return Data.MonthlyBalances
+            .Where(item =>
+                item.EntityId == entityId &&
+                item.Year == normalizedMonth.Year &&
+                item.Month == normalizedMonth.Month)
+            .Select(item => item.Balance)
+            .FirstOrDefault();
+    }
+
+    private decimal GetLatestBalanceBeforeMonth(Guid entityId, DateOnly month)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        return Data.MonthlyBalances
+            .Where(item =>
+                item.EntityId == entityId &&
+                NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) < normalizedMonth)
+            .OrderByDescending(item => item.Year)
+            .ThenByDescending(item => item.Month)
+            .Select(item => item.Balance)
+            .FirstOrDefault();
+    }
+
+    private DateOnly GetLoanStartMonth(Guid loanId)
+    {
+        var housingLoan = Data.HousingLoans.FirstOrDefault(item => item.Id == loanId);
+        if (housingLoan is not null)
+        {
+            return NormalizeMonth(housingLoan.LoanStartDate);
+        }
+
+        var transportLoan = Data.TransportLoans.FirstOrDefault(item => item.Id == loanId);
+        if (transportLoan is not null)
+        {
+            return NormalizeMonth(transportLoan.LoanStartDate);
+        }
+
+        return GetGenerationLimit();
+    }
+
+    private decimal GetLoanStartingBalance(Guid loanId)
+    {
+        var housingLoan = Data.HousingLoans.FirstOrDefault(item => item.Id == loanId);
+        if (housingLoan is not null)
+        {
+            return housingLoan.StartingRemainingDebt;
+        }
+
+        var transportLoan = Data.TransportLoans.FirstOrDefault(item => item.Id == loanId);
+        return transportLoan?.StartingRemainingDebt ?? 0m;
     }
 
     private NumberFormatInfo CreateNumberFormat()
@@ -1771,8 +2372,9 @@ public sealed class ApplicationState
         {
             var nameFilter = filter.Name.Trim();
             query = query.Where(entry =>
-                entry.Description.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
+                GetExpenseDescriptionDisplay(entry).Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
                 entry.Metadata.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
+                GetExpenseSubcategoryDisplay(entry).Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
                 entry.Subcategory.Contains(nameFilter, StringComparison.OrdinalIgnoreCase));
         }
 
@@ -1852,21 +2454,22 @@ public sealed class ApplicationState
             .Select(loan => loan.LoanStartDate)
             .Concat(Data.LoanInterestBindingPeriods
                 .Where(period => Data.HousingLoans.Any(loan => loan.Id == period.LoanId))
-                .Select(period => period.StartDate))
-            .Concat(Data.LoanAmortizationPlans
-                .Where(plan => Data.HousingLoans.Any(loan => loan.Id == plan.LoanId))
-                .Select(plan => plan.StartDate))
+                .Select(period => period.StartMonth))
             .ToList();
+
+        if (startCandidates.Count == 0)
+        {
+            startDate = default;
+            endDate = default;
+            return false;
+        }
 
         var endCandidates = Data.LoanInterestBindingPeriods
             .Where(period => Data.HousingLoans.Any(loan => loan.Id == period.LoanId))
-            .Select(period => period.EndDate)
-            .Concat(Data.LoanAmortizationPlans
-                .Where(plan => Data.HousingLoans.Any(loan => loan.Id == plan.LoanId))
-                .Select(plan => plan.EndDate))
+            .Select(period => period.EndMonth)
             .ToList();
 
-        if (startCandidates.Count == 0 || endCandidates.Count == 0)
+        if (endCandidates.Count == 0)
         {
             startDate = default;
             endDate = default;
@@ -1886,23 +2489,24 @@ public sealed class ApplicationState
             .Select(loan => loan.LoanStartDate)
             .Concat(Data.LoanInterestBindingPeriods
                 .Where(period => transportLoanIds.Contains(period.LoanId))
-                .Select(period => period.StartDate))
-            .Concat(Data.LoanAmortizationPlans
-                .Where(plan => transportLoanIds.Contains(plan.LoanId))
-                .Select(plan => plan.StartDate))
+                .Select(period => period.StartMonth))
             .Concat(Data.TransportLeasingContracts.Select(contract => contract.StartDate))
             .ToList();
 
+        if (startCandidates.Count == 0)
+        {
+            startDate = default;
+            endDate = default;
+            return false;
+        }
+
         var endCandidates = Data.LoanInterestBindingPeriods
             .Where(period => transportLoanIds.Contains(period.LoanId))
-            .Select(period => period.EndDate)
-            .Concat(Data.LoanAmortizationPlans
-                .Where(plan => transportLoanIds.Contains(plan.LoanId))
-                .Select(plan => plan.EndDate))
+            .Select(period => period.EndMonth)
             .Concat(Data.TransportLeasingContracts.Select(contract => contract.EndDate))
             .ToList();
 
-        if (startCandidates.Count == 0 || endCandidates.Count == 0)
+        if (endCandidates.Count == 0)
         {
             startDate = default;
             endDate = default;
@@ -1993,23 +2597,120 @@ public sealed class ApplicationState
             Category = category,
             Subcategory = subcategory,
             Metadata = metadata ?? string.Empty,
-            Description = $"{lender.Trim()} {subcategory}",
+            Description = string.Empty,
             LoanId = loanId,
             LoanInterestBindingPeriodId = interestBindingPeriodId,
             LoanAmortizationPlanId = amortizationPlanId,
             TransportVehicleId = category == ExpenseCategory.Transport ? transportVehicleId : null
         };
 
+    private int RecalculateLoanBalances<TLoan>(
+        ExpenseCategory category,
+        IEnumerable<TLoan> loans,
+        DateOnly startDate,
+        DateOnly endDate,
+        Func<TLoan, Guid> getLoanId,
+        Func<TLoan, string> getLender,
+        Func<TLoan, Guid?> getVehicleId)
+        where TLoan : class
+    {
+        var normalizedStart = NormalizeMonth(startDate);
+        var normalizedEnd = NormalizeMonth(endDate);
+
+        if (normalizedEnd < normalizedStart)
+        {
+            (normalizedStart, normalizedEnd) = (normalizedEnd, normalizedStart);
+        }
+
+        RemoveGeneratedExpensesInRange(category, normalizedStart, normalizedEnd, includeLeasing: false);
+
+        var generatedCount = 0;
+
+        foreach (var loan in loans)
+        {
+            var loanId = getLoanId(loan);
+            var loanStartMonth = GetLoanStartMonth(loanId);
+            if (loanStartMonth > normalizedEnd)
+            {
+                continue;
+            }
+
+            var calculationStart = normalizedStart < loanStartMonth ? loanStartMonth : normalizedStart;
+            var lender = getLender(loan);
+            var vehicleId = getVehicleId(loan);
+            var metadata = category == ExpenseCategory.Transport ? GetTransportVehicleName(vehicleId) : null;
+
+            RemoveMonthlyBalancesInRange(loanId, calculationStart, normalizedEnd);
+
+            foreach (var month in EnumerateMonths(calculationStart.Year, calculationStart.Month, normalizedEnd.Year, normalizedEnd.Month))
+            {
+                var monthDate = month.ToDateOnly();
+                var period = GetActiveLoanInterestBindingPeriods(loanId, monthDate).FirstOrDefault();
+                var openingBalance = GetLatestBalanceBeforeMonth(loanId, monthDate);
+                if (openingBalance == 0m)
+                {
+                    openingBalance = GetBalanceAtMonth(loanId, monthDate);
+                }
+
+                if (openingBalance == 0m)
+                {
+                    openingBalance = GetLoanStartingBalance(loanId);
+                }
+
+                var balance = openingBalance;
+                var amortizationAmount = period is null ? 0m : Math.Min(balance, period.MonthlyAmortization);
+
+                if (amortizationAmount > 0m)
+                {
+                    Data.ExpenseRecords.Add(CreateLoanExpenseEntry(
+                        loanId,
+                        lender,
+                        category,
+                        month,
+                        AmortizationSubcategory,
+                        amortizationAmount,
+                        period?.Id,
+                        null,
+                        metadata,
+                        vehicleId));
+                    generatedCount++;
+                }
+
+                balance = Math.Max(0m, balance - amortizationAmount);
+
+                if (period is not null && balance > 0m && period.InterestRate > 0m)
+                {
+                    var monthlyInterestCost = Math.Round(balance * ConvertPercentageToDecimal(period.InterestRate) / 12m, 2, MidpointRounding.AwayFromZero);
+                    if (monthlyInterestCost > 0m)
+                    {
+                        Data.ExpenseRecords.Add(CreateLoanExpenseEntry(
+                            loanId,
+                            lender,
+                            category,
+                            month,
+                            InterestSubcategory,
+                            monthlyInterestCost,
+                            period.Id,
+                            null,
+                            metadata,
+                            vehicleId));
+                        generatedCount++;
+                    }
+                }
+
+                SetMonthlyBalance(loanId, monthDate, balance);
+            }
+
+            RefreshAnyLoanDerivedValues(loanId);
+        }
+
+        return generatedCount;
+    }
+
     private IReadOnlyList<LoanInterestBindingPeriod> GetActiveLoanInterestBindingPeriods(Guid loanId, DateOnly month) =>
         Data.LoanInterestBindingPeriods
-            .Where(period => period.LoanId == loanId && CoversMonth(period.StartDate, period.EndDate, month))
-            .OrderBy(period => period.StartDate)
-            .ToList();
-
-    private IReadOnlyList<LoanAmortizationPlan> GetActiveLoanAmortizationPlans(Guid loanId, DateOnly month) =>
-        Data.LoanAmortizationPlans
-            .Where(plan => plan.LoanId == loanId && CoversMonth(plan.StartDate, plan.EndDate, month))
-            .OrderBy(plan => plan.StartDate)
+            .Where(period => period.LoanId == loanId && CoversMonth(period.StartMonth, period.EndMonth, month))
+            .OrderBy(period => period.StartMonth)
             .ToList();
 
     private void RemoveGeneratedExpensesInRange(ExpenseCategory category, DateOnly startDate, DateOnly endDate, bool includeLeasing)
@@ -2054,19 +2755,6 @@ public sealed class ApplicationState
             expense.Subcategory == LeasingSubcategory);
     }
 
-    private decimal GetOpeningDebtForLoan(Guid loanId, decimal startingRemainingDebt, ExpenseCategory category, DateOnly startDate)
-    {
-        var amortizedBeforeStart = Data.ExpenseRecords
-            .Where(expense =>
-                expense.LoanId == loanId &&
-                expense.Category == category &&
-                expense.LoanAmortizationPlanId.HasValue &&
-                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) < startDate)
-            .Sum(expense => expense.Amount);
-
-        return Math.Max(0m, startingRemainingDebt - amortizedBeforeStart);
-    }
-
     private void RefreshLoanDerivedValues(Guid loanId)
     {
         var loan = Data.HousingLoans.FirstOrDefault(item => item.Id == loanId);
@@ -2076,14 +2764,8 @@ public sealed class ApplicationState
         }
 
         var todayMonth = NormalizeMonth(DateOnly.FromDateTime(DateTime.Today));
-        loan.CurrentAmortization = GetActiveLoanAmortizationPlans(loan.Id, todayMonth)
-            .Sum(plan => plan.MonthlyAmortizationAmount);
-
-        var totalCalculatedAmortization = Data.ExpenseRecords
-            .Where(expense => expense.LoanId == loan.Id && expense.LoanAmortizationPlanId.HasValue)
-            .Sum(expense => expense.Amount);
-
-        loan.RemainingDebt = Math.Max(0m, loan.StartingRemainingDebt - totalCalculatedAmortization);
+        loan.CurrentAmortization = GetActiveLoanInterestBindingPeriods(loan.Id, todayMonth)
+            .Sum(period => period.MonthlyAmortization);
     }
 
     private void RefreshTransportLoanDerivedValues(Guid loanId)
@@ -2095,17 +2777,8 @@ public sealed class ApplicationState
         }
 
         var todayMonth = NormalizeMonth(DateOnly.FromDateTime(DateTime.Today));
-        loan.CurrentAmortization = GetActiveLoanAmortizationPlans(loan.Id, todayMonth)
-            .Sum(plan => plan.MonthlyAmortizationAmount);
-
-        var totalCalculatedAmortization = Data.ExpenseRecords
-            .Where(expense =>
-                expense.LoanId == loan.Id &&
-                expense.Category == ExpenseCategory.Transport &&
-                expense.LoanAmortizationPlanId.HasValue)
-            .Sum(expense => expense.Amount);
-
-        loan.RemainingDebt = Math.Max(0m, loan.StartingRemainingDebt - totalCalculatedAmortization);
+        loan.CurrentAmortization = GetActiveLoanInterestBindingPeriods(loan.Id, todayMonth)
+            .Sum(period => period.MonthlyAmortization);
     }
 
     private Credit GetCredit(Guid creditId) =>
@@ -2442,89 +3115,58 @@ public sealed class ApplicationState
             expense.CreditCostSource is CreditCostSource.GeneratedInterest or CreditCostSource.GeneratedResetAmortization);
     }
 
-    private decimal GetCreditDebtBeforeResetForMonth(Credit credit, DateOnly reportMonth)
-    {
-        var normalizedReportMonth = NormalizeMonth(reportMonth);
-        if (NormalizeMonth(credit.StartDate) > normalizedReportMonth)
-        {
-            return 0m;
-        }
-
-        var purchases = Data.ExpenseRecords
-            .Where(expense =>
-                expense.CreditId == credit.Id &&
-                expense.CreditCostSource == CreditCostSource.ManualPurchase &&
-                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) <= normalizedReportMonth)
-            .Sum(expense => expense.Amount);
-
-        var manualAmortizations = Data.ExpenseRecords
-            .Where(expense =>
-                expense.CreditId == credit.Id &&
-                expense.CreditCostSource == CreditCostSource.ManualAmortization &&
-                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) <= normalizedReportMonth)
-            .Sum(expense => expense.Amount);
-
-        var generatedResetBeforeMonth = Data.ExpenseRecords
-            .Where(expense =>
-                expense.CreditId == credit.Id &&
-                expense.CreditCostSource == CreditCostSource.GeneratedResetAmortization &&
-                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) < normalizedReportMonth)
-            .Sum(expense => expense.Amount);
-
-        var generatedInterestBeforeMonth = Data.ExpenseRecords
-            .Where(expense =>
-                expense.CreditId == credit.Id &&
-                expense.CreditCostSource == CreditCostSource.GeneratedInterest &&
-                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) < normalizedReportMonth)
-            .Sum(expense => expense.Amount);
-
-        return Math.Max(0m, credit.StartingRemainingDebt + purchases + generatedInterestBeforeMonth - manualAmortizations - generatedResetBeforeMonth);
-    }
-
-    private decimal GetCreditDebtForMonth(Credit credit, DateOnly reportMonth)
-    {
-        var normalizedReportMonth = NormalizeMonth(reportMonth);
-        var debtBeforeReset = GetCreditDebtBeforeResetForMonth(credit, normalizedReportMonth);
-        var generatedInterestForMonth = Data.ExpenseRecords
-            .Where(expense =>
-                expense.CreditId == credit.Id &&
-                expense.CreditCostSource == CreditCostSource.GeneratedInterest &&
-                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == normalizedReportMonth)
-            .Sum(expense => expense.Amount);
-
-        var generatedResetForMonth = Data.ExpenseRecords
-            .Where(expense =>
-                expense.CreditId == credit.Id &&
-                expense.CreditCostSource == CreditCostSource.GeneratedResetAmortization &&
-                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == normalizedReportMonth)
-            .Sum(expense => expense.Amount);
-
-        return Math.Max(0m, debtBeforeReset + generatedInterestForMonth - generatedResetForMonth);
-    }
-
     private void RefreshCreditDerivedValues(Guid creditId)
     {
-        var credit = Data.Credits.FirstOrDefault(item => item.Id == creditId);
-        if (credit is null)
+        _ = Data.Credits.FirstOrDefault(item => item.Id == creditId);
+    }
+
+    private bool IsCreditMonthPosted(Guid creditId, DateOnly month)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        return Data.ExpenseRecords.Any(expense =>
+            expense.CreditId == creditId &&
+            NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == normalizedMonth &&
+            expense.CreditCostSource is CreditCostSource.ManualAmortization or CreditCostSource.GeneratedInterest or CreditCostSource.GeneratedResetAmortization);
+    }
+
+    private async Task RecalculateCreditBalancesAsync(Guid creditId, DateOnly startDate)
+    {
+        var credit = GetCredit(creditId);
+        var normalizedStart = NormalizeMonth(startDate);
+        var creditStartMonth = NormalizeMonth(credit.StartDate);
+        if (normalizedStart < creditStartMonth)
         {
-            return;
+            normalizedStart = creditStartMonth;
         }
 
-        var purchases = Data.ExpenseRecords
-            .Where(expense => expense.CreditId == credit.Id && expense.CreditCostSource == CreditCostSource.ManualPurchase)
-            .Sum(expense => expense.Amount);
+        RemoveMonthlyBalancesFrom(credit.Id, normalizedStart);
 
-        var generatedInterest = Data.ExpenseRecords
-            .Where(expense => expense.CreditId == credit.Id && expense.CreditCostSource == CreditCostSource.GeneratedInterest)
-            .Sum(expense => expense.Amount);
+        var balance = normalizedStart == creditStartMonth
+            ? credit.StartingRemainingDebt
+            : GetBalanceAtOrBeforeMonth(credit.Id, normalizedStart.AddMonths(-1));
 
-        var amortizations = Data.ExpenseRecords
-            .Where(expense =>
-                expense.CreditId == credit.Id &&
-                expense.CreditCostSource is CreditCostSource.ManualAmortization or CreditCostSource.GeneratedResetAmortization)
-            .Sum(expense => expense.Amount);
+        foreach (var month in EnumerateMonths(normalizedStart.Year, normalizedStart.Month, GetGenerationLimit().Year, GetGenerationLimit().Month))
+        {
+            var monthDate = month.ToDateOnly();
+            balance += Data.ExpenseRecords
+                .Where(expense =>
+                    expense.CreditId == credit.Id &&
+                    NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == monthDate &&
+                    expense.CreditCostSource is CreditCostSource.ManualPurchase or CreditCostSource.GeneratedInterest)
+                .Sum(expense => expense.Amount);
 
-        credit.RemainingDebt = Math.Max(0m, credit.StartingRemainingDebt + purchases + generatedInterest - amortizations);
+            balance -= Data.ExpenseRecords
+                .Where(expense =>
+                    expense.CreditId == credit.Id &&
+                    NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) == monthDate &&
+                    expense.CreditCostSource is CreditCostSource.ManualAmortization or CreditCostSource.GeneratedResetAmortization)
+                .Sum(expense => expense.Amount);
+
+            balance = Math.Max(0m, balance);
+            SetMonthlyBalance(credit.Id, monthDate, balance);
+        }
+
+        await PersistAndNotifyAsync();
     }
 
     private IReadOnlyList<TransportLeasingContract> GetActiveTransportLeasingContracts(DateOnly month) =>
@@ -2541,6 +3183,13 @@ public sealed class ApplicationState
         return distributed;
     }
 
+    private HouseholdMember GetMember(Guid memberId) =>
+        Data.Members.FirstOrDefault(member => member.Id == memberId)
+        ?? throw new InvalidOperationException("Member was not found.");
+
+    private string GetMemberNameOrUnknown(Guid memberId) =>
+        Data.Members.FirstOrDefault(member => member.Id == memberId)?.Name ?? _localizer["common.unknown"];
+
     private decimal GetMonthlyIncome(int year, int month) =>
         Data.IncomeRecords
             .Where(entry => entry.Year == year && entry.Month == month)
@@ -2552,22 +3201,22 @@ public sealed class ApplicationState
             .Sum(entry => entry.Amount);
 
     private decimal GetHousingLoanDebtForMonth(DateOnly reportMonth) =>
-        Data.HousingLoans.Sum(loan => GetLoanDebtForMonth(loan.LoanStartDate, loan.StartingRemainingDebt, loan.Id, ExpenseCategory.Housing, reportMonth));
+        Data.HousingLoans.Sum(loan => GetBalanceAtOrBeforeMonth(loan.Id, NormalizeMonth(reportMonth)));
 
     private decimal GetCreditsDebtForMonth(DateOnly reportMonth)
     {
         var transportLoanDebt = Data.TransportLoans
-            .Sum(loan => GetLoanDebtForMonth(loan.LoanStartDate, loan.StartingRemainingDebt, loan.Id, ExpenseCategory.Transport, reportMonth));
+            .Sum(loan => GetBalanceAtOrBeforeMonth(loan.Id, NormalizeMonth(reportMonth)));
 
         var creditDebt = Data.Credits
-            .Sum(credit => GetCreditDebtForMonth(credit, reportMonth));
+            .Sum(credit => GetBalanceAtOrBeforeMonth(credit.Id, NormalizeMonth(reportMonth)));
 
         return transportLoanDebt + creditDebt;
     }
 
     private decimal GetSavingsForMonth(DateOnly reportMonth)
     {
-        return Data.SavingsAccounts.Sum(account => GetSavingsBalanceForMonth(account.Id, reportMonth));
+        return Data.SavingsAccounts.Sum(account => GetBalanceAtOrBeforeMonth(account.Id, NormalizeMonth(reportMonth)));
     }
 
     private decimal GetPropertyValueForMonth(DateOnly reportMonth)
@@ -2633,10 +3282,75 @@ public sealed class ApplicationState
         }
 
         Data.SavingsGeneratedReturns.RemoveAll(_ => true);
+        Data.MonthlyBalances.RemoveAll(balance => Data.SavingsAccounts.All(account => account.Id != balance.EntityId));
 
-        foreach (var account in Data.SavingsAccounts)
+        await PersistAndNotifyAsync();
+    }
+
+    private async Task RecalculateSavingsAccountBalancesAsync(Guid accountId, DateOnly affectedMonth)
+    {
+        var account = GetSavingsAccount(accountId);
+        var normalizedStart = NormalizeMonth(affectedMonth);
+        var accountStartMonth = NormalizeMonth(account.CreatedDate);
+        if (normalizedStart < accountStartMonth)
         {
-            RefreshSavingsAccountBalance(account.Id);
+            normalizedStart = accountStartMonth;
+        }
+
+        var endCandidates = Data.SavingsReturnPeriods
+            .Where(period => period.SavingsAccountId == accountId)
+            .Select(period => NormalizeMonth(period.EndDate))
+            .Concat(Data.ExpenseRecords
+                .Where(entry => entry.SavingsAccountId == accountId)
+                .Select(entry => NormalizeMonth(new DateOnly(entry.Year, entry.Month, 1))))
+            .Concat(Data.IncomeRecords
+                .Where(entry => entry.SavingsAccountId == accountId)
+                .Select(entry => NormalizeMonth(new DateOnly(entry.Year, entry.Month, 1))))
+            .Append(GetGenerationLimit())
+            .ToList();
+
+        var normalizedEnd = endCandidates.Count == 0 ? GetGenerationLimit() : endCandidates.Max();
+
+        Data.SavingsGeneratedReturns.RemoveAll(item =>
+            item.SavingsAccountId == accountId &&
+            NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) >= normalizedStart &&
+            NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) <= normalizedEnd);
+
+        RemoveMonthlyBalancesFrom(accountId, normalizedStart);
+
+        var balance = normalizedStart == accountStartMonth
+            ? account.OpeningBalance
+            : GetBalanceAtOrBeforeMonth(accountId, normalizedStart.AddMonths(-1));
+
+        foreach (var month in EnumerateMonths(normalizedStart.Year, normalizedStart.Month, normalizedEnd.Year, normalizedEnd.Month))
+        {
+            var monthDate = month.ToDateOnly();
+            balance += GetSavingsManualNetChangeForMonth(accountId, monthDate);
+            balance = Math.Max(0m, balance);
+
+            var period = GetActiveSavingsReturnPeriods(accountId, monthDate).FirstOrDefault();
+            if (period is not null && balance > 0m)
+            {
+                var grossReturn = Math.Round(balance * ConvertPercentageToDecimal(period.RatePercent) / 12m, 2, MidpointRounding.AwayFromZero);
+                var netReturn = account.AccountType == SavingsAccountType.Bank
+                    ? Math.Round(grossReturn - (grossReturn * ConvertPercentageToDecimal(period.TaxPercent)), 2, MidpointRounding.AwayFromZero)
+                    : grossReturn;
+
+                if (netReturn != 0m)
+                {
+                    Data.SavingsGeneratedReturns.Add(new SavingsGeneratedReturn
+                    {
+                        SavingsAccountId = account.Id,
+                        Year = month.Year,
+                        Month = month.Month,
+                        Amount = netReturn
+                    });
+
+                    balance += netReturn;
+                }
+            }
+
+            SetMonthlyBalance(account.Id, monthDate, balance);
         }
 
         await PersistAndNotifyAsync();
@@ -2685,46 +3399,16 @@ public sealed class ApplicationState
             .ToList();
 
     private decimal GetSavingsBalanceBeforeMonth(Guid accountId, DateOnly month)
-    {
-        var account = GetSavingsAccount(accountId);
-        var normalizedMonth = NormalizeMonth(month);
-        if (NormalizeMonth(account.CreatedDate) > normalizedMonth)
-        {
-            return 0m;
-        }
-
-        if (NormalizeMonth(account.CreatedDate) == normalizedMonth)
-        {
-            return account.OpeningBalance;
-        }
-
-        var manualChanges = GetSavingsManualNetChangeUntil(accountId, normalizedMonth.AddMonths(-1));
-        var generatedReturns = Data.SavingsGeneratedReturns
-            .Where(item => item.SavingsAccountId == accountId && NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) < normalizedMonth)
-            .Sum(item => item.Amount);
-
-        return Math.Max(0m, account.OpeningBalance + manualChanges + generatedReturns);
-    }
+        => GetBalanceAtOrBeforeMonth(accountId, NormalizeMonth(month).AddMonths(-1));
 
     private decimal GetSavingsBalanceBeforeOrAtMonth(Guid accountId, DateOnly month)
-    {
-        var account = GetSavingsAccount(accountId);
-        var normalizedMonth = NormalizeMonth(month);
-        if (NormalizeMonth(account.CreatedDate) > normalizedMonth)
-        {
-            return 0m;
-        }
-
-        var manualChanges = GetSavingsManualNetChangeUntil(accountId, normalizedMonth);
-        var generatedReturns = Data.SavingsGeneratedReturns
-            .Where(item => item.SavingsAccountId == accountId && NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) <= normalizedMonth)
-            .Sum(item => item.Amount);
-
-        return Math.Max(0m, account.OpeningBalance + manualChanges + generatedReturns);
-    }
+        => GetBalanceAtOrBeforeMonth(accountId, NormalizeMonth(month));
 
     private decimal GetSavingsBalanceForMonth(Guid accountId, DateOnly month) =>
         GetSavingsBalanceBeforeOrAtMonth(accountId, month);
+
+    private decimal GetCreditBalanceBeforeOrAtMonth(Guid creditId, DateOnly month) =>
+        GetBalanceAtOrBeforeMonth(creditId, NormalizeMonth(month));
 
     private decimal GetSavingsManualNetChangeUntil(Guid accountId, DateOnly inclusiveMonth)
     {
@@ -2763,39 +3447,17 @@ public sealed class ApplicationState
         return deposits - withdrawals;
     }
 
-    private void RefreshSavingsAccountBalance(Guid accountId)
-    {
-        var account = Data.SavingsAccounts.FirstOrDefault(item => item.Id == accountId);
-        if (account is null)
-        {
-            return;
-        }
-
-        account.CurrentBalance = GetSavingsBalanceBeforeOrAtMonth(account.Id, NormalizeMonth(DateOnly.FromDateTime(DateTime.Today)));
-    }
-
-    private decimal GetLoanDebtForMonth(DateOnly loanStartDate, decimal startingRemainingDebt, Guid loanId, ExpenseCategory category, DateOnly reportMonth)
-    {
-        var normalizedReportMonth = NormalizeMonth(reportMonth);
-        if (NormalizeMonth(loanStartDate) > normalizedReportMonth)
-        {
-            return 0m;
-        }
-
-        var amortizedAmount = Data.ExpenseRecords
-            .Where(expense =>
-                expense.LoanId == loanId &&
-                expense.Category == category &&
-                expense.LoanAmortizationPlanId.HasValue &&
-                NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) <= normalizedReportMonth)
-            .Sum(expense => expense.Amount);
-
-        return Math.Max(0m, startingRemainingDebt - amortizedAmount);
-    }
+    private decimal GetLoanDebtForMonth(DateOnly loanStartDate, decimal startingRemainingDebt, Guid loanId, ExpenseCategory category, DateOnly reportMonth) =>
+        GetBalanceAtOrBeforeMonth(loanId, NormalizeMonth(reportMonth));
 
     private MonthKey GetLatestMonth()
     {
-        return GetAllMonths().Distinct().OrderByDescending(month => month.ToDateOnly()).FirstOrDefault(GetCurrentMonth());
+        var currentMonth = GetCurrentMonth().ToDateOnly();
+        return GetAllMonths()
+            .Where(month => month.ToDateOnly() <= currentMonth)
+            .Distinct()
+            .OrderByDescending(month => month.ToDateOnly())
+            .FirstOrDefault(GetCurrentMonth());
     }
 
     private IEnumerable<MonthKey> GetAllMonths()
@@ -2809,6 +3471,28 @@ public sealed class ApplicationState
         {
             yield return new MonthKey(expense.Year, expense.Month);
         }
+
+        foreach (var balance in Data.MonthlyBalances)
+        {
+            yield return new MonthKey(balance.Year, balance.Month);
+        }
+    }
+
+    private (DateOnly StartDate, DateOnly EndDate) GetDefaultMonthlyReportRange()
+    {
+        var currentMonth = GetCurrentMonth().ToDateOnly();
+        var earliestRelevantMonth = GetAllMonths()
+            .Select(month => month.ToDateOnly())
+            .Where(month => month <= currentMonth)
+            .DefaultIfEmpty(currentMonth)
+            .Min();
+
+        var earliestAllowedMonth = currentMonth.AddMonths(-11);
+        var startDate = earliestRelevantMonth < earliestAllowedMonth
+            ? earliestAllowedMonth
+            : earliestRelevantMonth;
+
+        return (startDate, currentMonth);
     }
 
     private static MonthKey GetCurrentMonth()

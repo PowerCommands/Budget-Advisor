@@ -1,0 +1,275 @@
+@using System.ComponentModel.DataAnnotations
+@using BudgetAdvisor.App.Imports
+@using BudgetAdvisor.Domain.Models
+@inject LocalizationService Localizer
+@inject ApplicationState AppState
+
+<MudDialog>
+    <DialogContent>
+        @if (!isImporting)
+        {
+            @if (!string.IsNullOrWhiteSpace(ProviderLogoPath))
+            {
+                <div class="mb-3">
+                    <img src="@ProviderLogoPath" alt="@ProviderDisplayName" class="bank-import-provider-logo" />
+                </div>
+            }
+            <MudText Typo="Typo.h6">@Localizer["expenses.import.previewTitle"]</MudText>
+            <MudText Typo="Typo.body2" Class="mb-3">@string.Format(Localizer["expenses.import.previewHelp"], ProviderDisplayName)</MudText>
+        }
+        else
+        {
+            @if (!string.IsNullOrWhiteSpace(ProviderLogoPath))
+            {
+                <div class="mb-3">
+                    <img src="@ProviderLogoPath" alt="@ProviderDisplayName" class="bank-import-provider-logo" />
+                </div>
+            }
+            <div class="bank-import-progress-header mb-3">
+                <MudProgressLinear Value="@ProgressValue"
+                                   Color="Color.Primary"
+                                   Rounded="true"
+                                   Size="Size.Large" />
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <MudText Typo="Typo.body2">@string.Format(Localizer["expenses.import.progress"], importedCount, totalSelectedCount)</MudText>
+                    <MudText Typo="Typo.body2">@($"{ProgressValue:0}%")</MudText>
+                </div>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(validationMessage))
+        {
+            <div class="status-banner mb-3">@validationMessage</div>
+        }
+
+        <div class="table-responsive">
+            <table class="table app-table">
+                <thead>
+                    <tr>
+                        <th>
+                            <InputCheckbox @bind-Value="selectAllRows" @bind-Value:after="HandleSelectAllRowsChanged" />
+                        </th>
+                        <th>@Localizer["field.description"]</th>
+                        <th>@Localizer["field.date"]</th>
+                        <th>@Localizer["field.amount"]</th>
+                        <th>@Localizer["field.category"]</th>
+                        <th>@Localizer["field.subcategory"]</th>
+                        <th>@Localizer["expenses.import.recurring"]</th>
+                        <th>@Localizer["field.endDate"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in rows)
+                    {
+                        <tr class="@(row.IsLeaving ? "bank-import-row-leaving" : string.Empty)">
+                            <td>
+                                <InputCheckbox @bind-Value="row.Include"
+                                               @bind-Value:after="() => HandleRowIncludeChanged(row)"
+                                               disabled="@isImporting" />
+                            </td>
+                            <td>@row.Description</td>
+                            <td>@row.TransactionDate.ToString("yyyy-MM-dd")</td>
+                            <td>@AppState.FormatCurrency(row.Amount)</td>
+                            <td>
+                                <InputSelect class="form-select" @bind-Value="row.Category" disabled="@isImporting">
+                                    @foreach (var category in ExpenseCategories)
+                                    {
+                                        <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
+                                    }
+                                </InputSelect>
+                            </td>
+                            <td>
+                                <InputText class="form-control"
+                                           @bind-Value="row.Subcategory"
+                                           list="@GetSubcategoryListId(row)"
+                                           disabled="@isImporting" />
+                                <datalist id="@GetSubcategoryListId(row)">
+                                    @foreach (var suggestion in AppState.GetExpenseSubcategorySuggestions(row.Category))
+                                    {
+                                        <option value="@suggestion"></option>
+                                    }
+                                </datalist>
+                            </td>
+                            <td>
+                                <InputCheckbox @bind-Value="row.IsRecurring" disabled="@isImporting" />
+                            </td>
+                            <td>
+                                <InputDate class="form-control"
+                                           @bind-Value="row.EndDate"
+                                           disabled="@(!row.IsRecurring || isImporting)" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (isImporting && importStatuses.Count > 0)
+        {
+            <div class="bank-import-status-list mt-3">
+                @foreach (var status in importStatuses)
+                {
+                    <div class="bank-import-status-item">@status</div>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel" Disabled="@isImporting">@Localizer["action.cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitAsync" Disabled="@isImporting">@Localizer["action.import"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public string ProviderDisplayName { get; set; } = string.Empty;
+
+    [Parameter]
+    public string ProviderLogoPath { get; set; } = string.Empty;
+
+    [Parameter]
+    public IReadOnlyList<ImportedTransactionCandidate> Transactions { get; set; } = [];
+
+    private static IReadOnlyList<ExpenseCategory> ExpenseCategories { get; } = Enum.GetValues<ExpenseCategory>().ToList();
+
+    private readonly List<ImportPreviewRowModel> rows = [];
+    private readonly List<string> importStatuses = [];
+    private string? validationMessage;
+    private bool selectAllRows = true;
+    private bool isImporting;
+    private int totalSelectedCount;
+    private int importedCount;
+
+    private double ProgressValue =>
+        totalSelectedCount == 0
+            ? 0
+            : importedCount * 100d / totalSelectedCount;
+
+    protected override void OnInitialized()
+    {
+        rows.Clear();
+        rows.AddRange(Transactions.Select(transaction => new ImportPreviewRowModel
+        {
+            Include = true,
+            Description = transaction.Description,
+            TransactionDate = transaction.TransactionDate,
+            Amount = transaction.Amount,
+            Category = ExpenseCategory.Other,
+            Subcategory = string.Empty
+        }));
+
+        selectAllRows = rows.All(row => row.Include);
+    }
+
+    private async Task SubmitAsync()
+    {
+        validationMessage = null;
+
+        var selectedRows = rows.Where(row => row.Include).ToList();
+        if (selectedRows.Count == 0)
+        {
+            validationMessage = Localizer["expenses.import.validation.noRowsSelected"];
+            return;
+        }
+
+        if (selectedRows.Any(row => string.IsNullOrWhiteSpace(row.Subcategory)))
+        {
+            validationMessage = Localizer["expenses.import.validation.subcategoryRequired"];
+            return;
+        }
+
+        if (selectedRows.Any(row => row.IsRecurring && !row.EndDate.HasValue))
+        {
+            validationMessage = Localizer["expenses.import.validation.endDateRequired"];
+            return;
+        }
+
+        if (selectedRows.Any(row => row.IsRecurring && row.EndDate.HasValue && DateOnly.FromDateTime(row.EndDate.Value) < row.TransactionDate))
+        {
+            validationMessage = Localizer["expenses.import.validation.endDateBeforeTransaction"];
+            return;
+        }
+
+        rows.RemoveAll(row => !row.Include);
+        selectAllRows = false;
+        isImporting = true;
+        totalSelectedCount = selectedRows.Count;
+        importedCount = 0;
+        importStatuses.Clear();
+        await InvokeAsync(StateHasChanged);
+
+        foreach (var row in selectedRows)
+        {
+            var draft = new ImportedExpenseDraft
+            {
+                Date = row.TransactionDate,
+                EndDate = row.EndDate.HasValue ? DateOnly.FromDateTime(row.EndDate.Value) : null,
+                Amount = row.Amount,
+                IsRecurring = row.IsRecurring,
+                Category = row.Category,
+                Subcategory = row.Subcategory.Trim(),
+                Description = row.Description
+            };
+
+            await AppState.ImportExpenseEntryAsync(draft);
+
+            importedCount++;
+            importStatuses.Insert(0, string.Format(Localizer["expenses.import.rowImported"], row.Description, row.TransactionDate.ToString("yyyy-MM-dd")));
+
+            row.IsLeaving = true;
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(180);
+            rows.Remove(row);
+            await InvokeAsync(StateHasChanged);
+        }
+
+        await Task.Delay(250);
+        MudDialog.Close(DialogResult.Ok(importedCount));
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private Task HandleSelectAllRowsChanged()
+    {
+        foreach (var row in rows)
+        {
+            row.Include = selectAllRows;
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task HandleRowIncludeChanged(ImportPreviewRowModel row)
+    {
+        selectAllRows = rows.Count > 0 && rows.All(item => item.Include);
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private static string GetSubcategoryListId(ImportPreviewRowModel row) => $"bank-import-subcategory-{row.Id}";
+
+    private sealed class ImportPreviewRowModel
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        public bool Include { get; set; }
+
+        public string Description { get; set; } = string.Empty;
+
+        public DateOnly TransactionDate { get; set; }
+
+        public decimal Amount { get; set; }
+
+        public bool IsRecurring { get; set; }
+
+        public DateTime? EndDate { get; set; }
+
+        public bool IsLeaving { get; set; }
+
+        public ExpenseCategory Category { get; set; }
+
+        public string Subcategory { get; set; } = string.Empty;
+    }
+}

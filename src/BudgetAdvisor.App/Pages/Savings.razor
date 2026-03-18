@@ -4,30 +4,30 @@
 @inject IDialogService DialogService
 @inject LocalizationService Localizer
 
-<PageTitle>Budget Advisor - @Localizer["nav.savings"]</PageTitle>
-
 @if (!string.IsNullOrWhiteSpace(statusMessage))
 {
     <div class="status-banner">@statusMessage</div>
 }
 
 <MudTabs Class="section-tabs" Rounded="true" SliderColor="Color.Primary" Elevation="0">
-    <MudTabPanel Text="@Localizer["savings.depositsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
-        <ExpenseRecordsTable Scope="ExpenseQueryScope.Savings"
-                             TitleKey="savings.depositsTab"
-                             OnDelete="HandleDeleteSavingsExpenseAsync" />
-    </MudTabPanel>
-
-    <MudTabPanel Text="@Localizer["savings.returnsTab"]" Icon="@Icons.Material.Filled.TrendingUp">
+    <MudTabPanel Text="@Localizer["savings.transactionsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
         <section class="card-panel">
             <div class="section-title-row">
-                <h2>@Localizer["savings.returnsTab"]</h2>
+                <h2>@Localizer["savings.transactionsTab"]</h2>
             </div>
 
             <div class="form-grid mb-3">
                 <div>
                     <label class="form-label">@Localizer["filter.name"]</label>
                     <InputText class="form-control" @bind-Value="returnsNameFilter" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.type"]</label>
+                    <InputSelect class="form-select" @bind-Value="transactionTypeFilter">
+                        <option value="">@Localizer["filter.allCategories"]</option>
+                        <option value="@SavingsTransactionType.Deposit">@Localizer["savings.deposit"]</option>
+                        <option value="@SavingsTransactionType.Withdrawal">@Localizer["savings.withdrawal"]</option>
+                    </InputSelect>
                 </div>
                 <div>
                     <label class="form-label">@Localizer["field.category"]</label>
@@ -53,6 +53,7 @@
                     <thead>
                         <tr>
                             <th>@Localizer["field.name"]</th>
+                            <th>@Localizer["field.type"]</th>
                             <th>@Localizer["field.category"]</th>
                             <th>@Localizer["table.period"]</th>
                             <th>@Localizer["field.amount"]</th>
@@ -60,26 +61,27 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @if (!FilteredWithdrawalEntries.Any())
+                        @if (!FilteredTransactions.Any())
                         {
                             <tr>
-                                <td colspan="5" class="empty-state">@Localizer["table.noCostRows"]</td>
+                                <td colspan="6" class="empty-state">@Localizer["table.noCostRows"]</td>
                             </tr>
                         }
                         else
                         {
-                            @foreach (var entry in FilteredWithdrawalEntries)
+                            @foreach (var entry in FilteredTransactions)
                             {
                                 <tr>
-                                    <td>@GetIncomeDisplay(entry)</td>
-                                    <td>@entry.Type</td>
+                                    <td>@entry.Name</td>
+                                    <td>@Localizer[entry.TransactionType == SavingsTransactionType.Deposit ? "savings.deposit" : "savings.withdrawal"]</td>
+                                    <td>@entry.CategoryDisplay</td>
                                     <td>@($"{entry.Year:0000}/{entry.Month:00}")</td>
                                     <td>@AppState.FormatCurrency(entry.Amount)</td>
                                     <td>
                                         <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                                        Color="Color.Error"
                                                        Size="Size.Small"
-                                                       OnClick="@(() => HandleDeleteSavingsIncomeAsync(entry))" />
+                                                       OnClick="@(() => HandleDeleteTransactionAsync(entry))" />
                                     </td>
                                 </tr>
                             }
@@ -104,11 +106,21 @@
 </MudTabs>
 
 @code {
+    private readonly HashSet<Guid> expandedAccountIds = [];
     private string? statusMessage;
     private string returnsNameFilter = string.Empty;
+    private string transactionTypeFilter = string.Empty;
     private string returnsTypeFilter = string.Empty;
     private DateTime? returnsStartDate;
     private DateTime? returnsEndDate;
+
+    private IEnumerable<ExpenseEntry> SavingsDepositEntries =>
+        AppState.Data.ExpenseRecords
+            .Where(entry => entry.SavingsAccountId.HasValue)
+            .OrderByDescending(entry => entry.Year)
+            .ThenByDescending(entry => entry.Month)
+            .ThenBy(entry => entry.Subcategory)
+            .ThenBy(entry => entry.Metadata);
 
     private IEnumerable<IncomeEntry> SavingsWithdrawalEntries =>
         AppState.Data.IncomeRecords
@@ -118,20 +130,45 @@
             .ThenBy(entry => entry.Type)
             .ThenBy(entry => entry.Metadata);
 
-    private IReadOnlyList<IncomeEntry> FilteredWithdrawalEntries =>
-        SavingsWithdrawalEntries
+    private IReadOnlyList<SavingsTransactionListItem> FilteredTransactions =>
+        SavingsDepositEntries
+            .Select(entry => new SavingsTransactionListItem(
+                entry.Id,
+                SavingsTransactionType.Deposit,
+                GetExpenseTransactionName(entry),
+                GetSavingsAccountTypeValue(entry.SavingsAccountId),
+                GetSavingsAccountTypeDisplay(entry.SavingsAccountId),
+                entry.Year,
+                entry.Month,
+                entry.Amount))
+            .Concat(SavingsWithdrawalEntries.Select(entry => new SavingsTransactionListItem(
+                entry.Id,
+                SavingsTransactionType.Withdrawal,
+                GetIncomeDisplay(entry),
+                entry.Type,
+                GetSavingsCategoryDisplay(entry.Type),
+                entry.Year,
+                entry.Month,
+                entry.Amount)))
             .Where(entry =>
                 string.IsNullOrWhiteSpace(returnsNameFilter) ||
-                GetIncomeDisplay(entry).Contains(returnsNameFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+                entry.Name.Contains(returnsNameFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(entry =>
+                string.IsNullOrWhiteSpace(transactionTypeFilter) ||
+                string.Equals(entry.TransactionType, transactionTypeFilter.Trim(), StringComparison.OrdinalIgnoreCase))
             .Where(entry =>
                 string.IsNullOrWhiteSpace(returnsTypeFilter) ||
-                string.Equals(entry.Type, returnsTypeFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+                string.Equals(entry.CategoryValue, returnsTypeFilter.Trim(), StringComparison.OrdinalIgnoreCase))
             .Where(entry =>
                 !returnsStartDate.HasValue ||
                 new DateOnly(entry.Year, entry.Month, 1) >= new DateOnly(returnsStartDate.Value.Year, returnsStartDate.Value.Month, 1))
             .Where(entry =>
                 !returnsEndDate.HasValue ||
                 new DateOnly(entry.Year, entry.Month, 1) <= new DateOnly(returnsEndDate.Value.Year, returnsEndDate.Value.Month, 1))
+            .OrderByDescending(entry => entry.Year)
+            .ThenByDescending(entry => entry.Month)
+            .ThenBy(entry => entry.TransactionType)
+            .ThenBy(entry => entry.Name)
             .ToList();
 
     protected override void OnInitialized()
@@ -153,91 +190,135 @@
         }
         else
         {
-            @foreach (var account in GetAccounts(accountType))
-            {
-                <section class="card-panel mt-4">
-                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-                        <div>
-                            <h2>@account.AccountName</h2>
-                            <div class="form-grid">
-                                @if (accountType == SavingsAccountType.Bank)
+            <section class="card-panel mt-4">
+                <div class="table-responsive">
+                    <table class="table app-table compact-overview-table">
+                        <thead>
+                            <tr>
+                                <th>@Localizer["field.name"]</th>
+                                <th>@GetProviderColumnLabel(accountType)</th>
+                                <th>@Localizer["table.balance"]</th>
+                                <th>@Localizer["savings.openingBalance"]</th>
+                                <th>@Localizer["field.actions"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var account in GetAccounts(accountType))
+                            {
+                                <tr>
+                                    <td>@account.AccountName</td>
+                                    <td>@GetProviderDisplay(account, accountType)</td>
+                                    <td>@AppState.FormatCurrency(AppState.GetSavingsAccountCurrentBalance(account.Id))</td>
+                                    <td>@AppState.FormatCurrency(account.OpeningBalance)</td>
+                                    <td>
+                                        <div class="button-row">
+                                            <button class="btn btn-outline-primary btn-sm" type="button" @onclick="() => ToggleAccountDetails(account.Id)">Details</button>
+                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleDepositAsync(account)">@Localizer["savings.deposit"]</button>
+                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleWithdrawalAsync(account)">@Localizer["savings.withdrawal"]</button>
+                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleAddPeriodAsync(account)">@Localizer["savings.addPeriod"]</button>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Color="Color.Error"
+                                                           Size="Size.Small"
+                                                           OnClick="@(() => HandleDeleteAccountAsync(account))" />
+                                        </div>
+                                    </td>
+                                </tr>
+                                @if (IsAccountExpanded(account.Id))
                                 {
-                                    <div>
-                                        <label class="form-label">@Localizer["savings.bankName"]</label>
-                                        <div>@account.ProviderName</div>
-                                    </div>
-                                }
-                                <div>
-                                    <label class="form-label">@Localizer["savings.openingBalance"]</label>
-                                    <div>@AppState.FormatCurrency(account.OpeningBalance)</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["table.balance"]</label>
-                                    <div>@AppState.FormatCurrency(account.CurrentBalance)</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="button-row">
-                            <button class="btn btn-outline-primary" @onclick="() => HandleDepositAsync(account)">@Localizer["savings.deposit"]</button>
-                            <button class="btn btn-outline-primary" @onclick="() => HandleWithdrawalAsync(account)">@Localizer["savings.withdrawal"]</button>
-                            <button class="btn btn-outline-primary" @onclick="() => HandleAddPeriodAsync(account)">@Localizer["savings.addPeriod"]</button>
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                           Color="Color.Error"
-                                           Size="Size.Small"
-                                           OnClick="@(() => HandleDeleteAccountAsync(account))" />
-                        </div>
-                    </div>
+                                    <tr class="row-detail">
+                                        <td colspan="5">
+                                            <div class="inline-detail-shell">
+                                                <section class="card-panel mt-4">
+                                                    <h3>@Localizer["savings.periods"]</h3>
+                                                    <div class="table-responsive">
+                                                        <table class="table app-table">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>@Localizer["field.start"]</th>
+                                                                    <th>@Localizer["field.end"]</th>
+                                                                    <th>@Localizer[accountType == SavingsAccountType.Bank ? "savings.interestRate" : "savings.estimatedReturn"]</th>
+                                                                    @if (accountType == SavingsAccountType.Bank)
+                                                                    {
+                                                                        <th>@Localizer["savings.taxPercent"]</th>
+                                                                    }
+                                                                    <th>@Localizer["field.actions"]</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @if (!GetPeriods(account.Id).Any())
+                                                                {
+                                                                    <tr>
+                                                                        <td colspan="@(accountType == SavingsAccountType.Bank ? 5 : 4)" class="empty-state">@Localizer["savings.noPeriods"]</td>
+                                                                    </tr>
+                                                                }
+                                                                else
+                                                                {
+                                                                    @foreach (var period in GetPeriods(account.Id))
+                                                                    {
+                                                                        <tr>
+                                                                            <td>@period.StartDate.ToString("yyyy-MM-dd")</td>
+                                                                            <td>@period.EndDate.ToString("yyyy-MM-dd")</td>
+                                                                            <td>@($"{period.RatePercent:0.##}%")</td>
+                                                                            @if (accountType == SavingsAccountType.Bank)
+                                                                            {
+                                                                                <td>@($"{period.TaxPercent:0.##}%")</td>
+                                                                            }
+                                                                            <td>
+                                                                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                                                               Color="Color.Error"
+                                                                                               Size="Size.Small"
+                                                                                               OnClick="@(() => HandleDeletePeriodAsync(period))" />
+                                                                            </td>
+                                                                        </tr>
+                                                                    }
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </section>
 
-                    <section class="card-panel mt-4">
-                        <h3>@Localizer["savings.periods"]</h3>
-                        <div class="table-responsive">
-                            <table class="table app-table">
-                                <thead>
-                                    <tr>
-                                        <th>@Localizer["field.start"]</th>
-                                        <th>@Localizer["field.end"]</th>
-                                        <th>@Localizer[accountType == SavingsAccountType.Bank ? "savings.interestRate" : "savings.estimatedReturn"]</th>
-                                        @if (accountType == SavingsAccountType.Bank)
-                                        {
-                                            <th>@Localizer["savings.taxPercent"]</th>
-                                        }
-                                        <th>@Localizer["field.actions"]</th>
+                                                <section class="card-panel mt-4">
+                                                    <details>
+                                                        <summary class="btn btn-outline-primary btn-sm">@Localizer["table.balance"]</summary>
+                                                        <div class="table-responsive mt-3">
+                                                            <table class="table app-table">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>@Localizer["credits.month"]</th>
+                                                                        <th>@Localizer["table.balance"]</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    @if (!GetBalanceEntries(account.Id).Any())
+                                                                    {
+                                                                        <tr>
+                                                                            <td colspan="2" class="empty-state">@Localizer["table.noCostRows"]</td>
+                                                                        </tr>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        @foreach (var balance in GetBalanceEntries(account.Id))
+                                                                        {
+                                                                            <tr>
+                                                                                <td>@($"{balance.Year:0000}/{balance.Month:00}")</td>
+                                                                                <td>@AppState.FormatCurrency(balance.Balance)</td>
+                                                                            </tr>
+                                                                        }
+                                                                    }
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </details>
+                                                </section>
+                                            </div>
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    @if (!GetPeriods(account.Id).Any())
-                                    {
-                                        <tr>
-                                            <td colspan="@(accountType == SavingsAccountType.Bank ? 5 : 4)" class="empty-state">@Localizer["savings.noPeriods"]</td>
-                                        </tr>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var period in GetPeriods(account.Id))
-                                        {
-                                            <tr>
-                                                <td>@period.StartDate.ToString("yyyy-MM-dd")</td>
-                                                <td>@period.EndDate.ToString("yyyy-MM-dd")</td>
-                                                <td>@($"{period.RatePercent:0.##}%")</td>
-                                                @if (accountType == SavingsAccountType.Bank)
-                                                {
-                                                    <td>@($"{period.TaxPercent:0.##}%")</td>
-                                                }
-                                                <td>
-                                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                                   Color="Color.Error"
-                                                                   Size="Size.Small"
-                                                                   OnClick="@(() => HandleDeletePeriodAsync(period))" />
-                                                </td>
-                                            </tr>
-                                        }
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
-                </section>
-            }
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         }
     </div>;
 
@@ -254,6 +335,67 @@
             .OrderBy(period => period.StartDate)
             .ThenBy(period => period.EndDate)
             .ToList();
+
+    private IReadOnlyList<MonthlyBalance> GetBalanceEntries(Guid entityId) =>
+        AppState.GetMonthlyBalances(entityId);
+
+    private string GetExpenseTransactionName(ExpenseEntry entry) =>
+        AppState.GetExpenseDescriptionDisplay(entry);
+
+    private string GetSavingsAccountTypeDisplay(Guid? savingsAccountId)
+    {
+        if (!savingsAccountId.HasValue)
+        {
+            return string.Empty;
+        }
+
+        var account = AppState.Data.SavingsAccounts.FirstOrDefault(item => item.Id == savingsAccountId.Value);
+        return account is null ? string.Empty : GetSavingsCategoryDisplay(account.AccountType.ToString());
+    }
+
+    private string GetSavingsAccountTypeValue(Guid? savingsAccountId)
+    {
+        if (!savingsAccountId.HasValue)
+        {
+            return string.Empty;
+        }
+
+        var account = AppState.Data.SavingsAccounts.FirstOrDefault(item => item.Id == savingsAccountId.Value);
+        return account?.AccountType.ToString() ?? string.Empty;
+    }
+
+    private string GetSavingsCategoryDisplay(string type) =>
+        type switch
+        {
+            "Bank" => Localizer["savings.bankTab"],
+            "Fund" => Localizer["savings.fundsTab"],
+            "Stock" => Localizer["savings.stocksTab"],
+            _ => type
+        };
+
+    private bool IsAccountExpanded(Guid accountId) => expandedAccountIds.Contains(accountId);
+
+    private void ToggleAccountDetails(Guid accountId)
+    {
+        if (!expandedAccountIds.Add(accountId))
+        {
+            expandedAccountIds.Remove(accountId);
+        }
+    }
+
+    private string GetProviderColumnLabel(SavingsAccountType accountType) => accountType switch
+    {
+        SavingsAccountType.Bank => Localizer["savings.bankName"],
+        SavingsAccountType.Fund => Localizer["savings.depotName"],
+        _ => Localizer["savings.depotName"]
+    };
+
+    private string GetProviderDisplay(SavingsAccount account, SavingsAccountType accountType) => accountType switch
+    {
+        SavingsAccountType.Bank => account.ProviderName,
+        SavingsAccountType.Fund => account.ProviderName,
+        _ => account.ProviderName
+    };
 
     private string GetIncomeDisplay(IncomeEntry entry) =>
         string.IsNullOrWhiteSpace(entry.Metadata)
@@ -286,12 +428,17 @@
             return;
         }
 
-        if (result.Data is not CreateSavingsAccountDialog.CreateSavingsAccountDialogModel model)
+        if (result.Data is not CreateSavingsAccountDialog.CreateSavingsAccountDialogModel model || !model.StartDate.HasValue)
         {
             return;
         }
 
-        await AppState.AddSavingsAccountAsync(accountType, model.ProviderName, model.AccountName, model.OpeningBalance);
+        await AppState.AddSavingsAccountAsync(
+            accountType,
+            model.ProviderName,
+            model.AccountName,
+            model.OpeningBalance,
+            DateOnly.FromDateTime(model.StartDate.Value));
         statusMessage = Localizer["savings.accountCreated"];
     }
 
@@ -495,6 +642,11 @@
         statusMessage = Localizer["savings.returnDeleted"];
     }
 
+    private Task HandleDeleteTransactionAsync(SavingsTransactionListItem entry) =>
+        entry.TransactionType == SavingsTransactionType.Deposit
+            ? HandleDeleteSavingsExpenseAsync(AppState.Data.ExpenseRecords.First(item => item.Id == entry.Id))
+            : HandleDeleteSavingsIncomeAsync(AppState.Data.IncomeRecords.First(item => item.Id == entry.Id));
+
     private void HandleChanged() => InvokeAsync(StateHasChanged);
 
     public void Dispose()
@@ -502,4 +654,20 @@
         AppState.Changed -= HandleChanged;
         Localizer.Changed -= HandleChanged;
     }
+
+    private static class SavingsTransactionType
+    {
+        public const string Deposit = "Deposit";
+        public const string Withdrawal = "Withdrawal";
+    }
+
+    private sealed record SavingsTransactionListItem(
+        Guid Id,
+        string TransactionType,
+        string Name,
+        string CategoryValue,
+        string CategoryDisplay,
+        int Year,
+        int Month,
+        decimal Amount);
 }

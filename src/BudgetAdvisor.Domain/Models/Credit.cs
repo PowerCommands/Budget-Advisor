@@ -14,8 +14,6 @@ public sealed class Credit
 
     public decimal StartingRemainingDebt { get; set; }
 
-    public decimal RemainingDebt { get; set; }
-
     public decimal MonthlyInterestRate { get; set; }
 
     public bool ResetAtEndOfMonth { get; set; }

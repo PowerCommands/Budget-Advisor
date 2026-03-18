@@ -5,270 +5,224 @@
 @inject IDialogService DialogService
 @inject LocalizationService Localizer
 
-<PageTitle>Budget Advisor - @Localizer["nav.housingTab"]</PageTitle>
-
 @if (!string.IsNullOrWhiteSpace(statusMessage))
 {
     <div class="status-banner">@statusMessage</div>
 }
 
-<section class="card-panel mb-4">
-    <h2>@Localizer["housing.homeResidence"]</h2>
-    <EditForm EditContext="homeResidenceEditContext" OnValidSubmit="HandleSaveHomeResidenceAsync">
-        <DataAnnotationsValidator />
-        <ValidationSummary />
-        <div class="form-grid">
-            <div>
-                <label class="form-label">@Localizer["housing.residenceType"]</label>
-                <InputSelect class="form-select" @bind-Value="homeResidenceForm.ResidenceType">
-                    @foreach (var option in ResidenceTypeOptions)
-                    {
-                        <option value="@option.Type">@Localizer[option.LabelKey]</option>
-                    }
-                </InputSelect>
-            </div>
-            @if (ShowsOwnedResidenceFields)
-            {
-                <div>
-                    <label class="form-label">@Localizer["housing.purchaseYear"]</label>
-                    <InputNumber class="form-control" @bind-Value="homeResidenceForm.PurchaseYear" />
-                    <ValidationMessage For="() => homeResidenceForm.PurchaseYear" />
-                </div>
-                <div>
-                    <label class="form-label">@Localizer["housing.purchasePrice"]</label>
-                    <InputNumber class="form-control" @bind-Value="homeResidenceForm.PurchasePrice" />
-                    <ValidationMessage For="() => homeResidenceForm.PurchasePrice" />
-                </div>
-                <div>
-                    <label class="form-label">@Localizer["housing.currentMarketValue"]</label>
-                    <InputNumber class="form-control" @bind-Value="homeResidenceForm.CurrentMarketValue" />
-                    <ValidationMessage For="() => homeResidenceForm.CurrentMarketValue" />
-                </div>
-            }
-        </div>
-        <button class="btn btn-primary" type="submit">@Localizer["action.save"]</button>
-    </EditForm>
-</section>
-
 <MudTabs Class="section-tabs" Rounded="true" SliderColor="Color.Primary" Elevation="0">
     <MudTabPanel Text="@Localizer["housing.costsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
-        <div class="stack-grid two-up">
-            <section class="card-panel">
-                <h2>@Localizer["housing.oneTimeCost"]</h2>
-                <EditForm EditContext="costEditContext" OnValidSubmit="HandleAddCostAsync">
-                    <DataAnnotationsValidator />
-                    <ValidationSummary />
-                    <div class="form-grid">
-                        <div>
-                            <label class="form-label">@Localizer["field.description"]</label>
-                            <InputText class="form-control" @bind-Value="costForm.Description" />
-                            <ValidationMessage For="() => costForm.Description" />
-                        </div>
-                        <div>
-                            <label class="form-label">@Localizer["field.amount"]</label>
-                            <InputNumber class="form-control" @bind-Value="costForm.Amount" />
-                            <ValidationMessage For="() => costForm.Amount" />
-                        </div>
-                        <div>
-                            <label class="form-label">@Localizer["field.date"]</label>
-                            <InputDate class="form-control" @bind-Value="costForm.Date" />
-                            <ValidationMessage For="() => costForm.Date" />
-                        </div>
-                        <div>
-                            <label class="form-label">@Localizer["field.subcategory"]</label>
-                            <InputText class="form-control" @bind-Value="costForm.Subcategory" list="housing-cost-subcategories" />
-                            <datalist id="housing-cost-subcategories">
-                                @foreach (var subcategory in GetSubcategorySuggestions())
-                                {
-                                    <option value="@subcategory"></option>
-                                }
-                            </datalist>
-                            <ValidationMessage For="() => costForm.Subcategory" />
-                        </div>
-                    </div>
-                    <button class="btn btn-primary" type="submit">@Localizer["action.addHousingCost"]</button>
-                </EditForm>
-            </section>
-
-            <section class="card-panel">
-                <h2>@Localizer["housing.series"]</h2>
-                <EditForm EditContext="definitionEditContext" OnValidSubmit="HandleAddDefinitionAsync">
-                    <DataAnnotationsValidator />
-                    <ValidationSummary />
-                    <div class="form-grid">
-                        <div>
-                            <label class="form-label">@Localizer["field.description"]</label>
-                            <InputText class="form-control" @bind-Value="definitionForm.Description" />
-                            <ValidationMessage For="() => definitionForm.Description" />
-                        </div>
-                        <div>
-                            <label class="form-label">@Localizer["field.subcategory"]</label>
-                            <InputText class="form-control" @bind-Value="definitionForm.Subcategory" list="housing-definition-subcategories" />
-                            <datalist id="housing-definition-subcategories">
-                                @foreach (var subcategory in GetSubcategorySuggestions())
-                                {
-                                    <option value="@subcategory"></option>
-                                }
-                            </datalist>
-                            <ValidationMessage For="() => definitionForm.Subcategory" />
-                        </div>
-                        <div>
-                            <label class="form-label">@Localizer["field.amount"]</label>
-                            <InputNumber class="form-control" @bind-Value="definitionForm.Amount" />
-                            <ValidationMessage For="() => definitionForm.Amount" />
-                        </div>
-                        <div>
-                            <label class="form-label">@Localizer["field.start"]</label>
-                            <InputDate class="form-control" @bind-Value="definitionForm.StartDate" />
-                            <ValidationMessage For="() => definitionForm.StartDate" />
-                        </div>
-                        <div>
-                            <label class="form-label">@Localizer["field.end"]</label>
-                            <InputDate class="form-control" @bind-Value="definitionForm.EndDate" />
-                            <ValidationMessage For="() => definitionForm.EndDate" />
-                        </div>
-                        <div>
-                            <label class="form-label">@Localizer["field.interval"]</label>
-                            <InputSelect class="form-select" @bind-Value="definitionForm.IntervalMonths">
-                                @foreach (var interval in DefinitionIntervals)
-                                {
-                                    <option value="@interval.Months">@Localizer[interval.LabelKey]</option>
-                                }
-                            </InputSelect>
-                            <ValidationMessage For="() => definitionForm.IntervalMonths" />
-                        </div>
-                    </div>
-                    <button class="btn btn-primary" type="submit">@Localizer["action.addHousingDefinition"]</button>
-                </EditForm>
-            </section>
-        </div>
-
-        <div class="stack-grid two-up mt-4">
-            <section class="card-panel">
-                <h2>@Localizer["housing.costEntries"]</h2>
-                <label class="form-check d-inline-flex align-items-center gap-2 mb-3">
-                    <InputCheckbox class="form-check-input mt-0" @bind-Value="showAllHousingCosts" />
-                    <span>@Localizer["filter.showAllCosts"]</span>
-                </label>
-                <div class="table-responsive">
-                    <table class="table app-table">
-                        <thead>
-                            <tr>
-                                <th>@Localizer["field.description"]</th>
-                                <th>@Localizer["field.subcategory"]</th>
-                                <th>@Localizer["field.year"]</th>
-                                <th>@Localizer["field.month"]</th>
-                                <th>@Localizer["field.amount"]</th>
-                                <th>@Localizer["field.actions"]</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @if (!HousingExpenses.Any())
-                            {
-                                <tr>
-                                    <td colspan="6" class="empty-state">@Localizer["table.noCostRows"]</td>
-                                </tr>
-                            }
-                            else
-                            {
-                                @foreach (var expense in HousingExpenses)
-                                {
-                                    <tr>
-                                        <td>@expense.Description</td>
-                                        <td>@AppState.GetExpenseSubcategoryDisplay(expense)</td>
-                                        <td>@expense.Year</td>
-                                        <td>@Localizer[$"month.{expense.Month}"]</td>
-                                        <td>@AppState.FormatCurrency(expense.Amount)</td>
-                                        <td>
-                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                           Color="Color.Error"
-                                                           Size="Size.Small"
-                                                           OnClick="@(() => HandleDeleteExpenseAsync(expense))" />
-                                        </td>
-                                    </tr>
-                                }
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="card-panel">
-                <h2>@Localizer["housing.definitions"]</h2>
-                <div class="table-responsive">
-                    <table class="table app-table">
-                        <thead>
-                            <tr>
-                                <th>@Localizer["field.description"]</th>
-                                <th>@Localizer["field.subcategory"]</th>
-                                <th>@Localizer["field.amount"]</th>
-                                <th>@Localizer["field.interval"]</th>
-                                <th>@Localizer["field.start"]</th>
-                                <th>@Localizer["field.end"]</th>
-                                <th>@Localizer["field.actions"]</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var definition in HousingDefinitions)
-                            {
-                                <tr>
-                                    <td>@definition.Description</td>
-                                    <td>@definition.Subcategory</td>
-                                    <td>@AppState.FormatCurrency(definition.Amount)</td>
-                                    <td>@GetIntervalLabel(definition.IntervalMonths)</td>
-                                    <td>@GetMonthYearLabel(definition.StartYear, definition.StartMonth)</td>
-                                    <td>@GetMonthYearLabel(definition.EndYear, definition.EndMonth)</td>
-                                    <td>
-                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                       Color="Color.Error"
-                                                       Size="Size.Small"
-                                                       OnClick="@(() => HandleDeleteDefinitionAsync(definition))" />
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-        </div>
+        <ExpenseRecordsTable Scope="ExpenseQueryScope.Housing"
+                             ShowTitle="false"
+                             DefaultToCurrentMonth="true"
+                             ShowAllCostsToggle="true"
+                             IncludeAllCosts="@showAllHousingCosts"
+                             IncludeAllCostsChanged="HandleShowAllHousingCostsChanged"
+                             OnDelete="HandleDeleteExpenseAsync" />
     </MudTabPanel>
 
-    <MudTabPanel Text="@Localizer["housing.loansTab"]" Icon="@Icons.Material.Filled.AccountBalance">
+    <MudTabPanel Text="@Localizer["housing.oneTimeCost"]" Icon="@Icons.Material.Filled.AddCard">
         <section class="card-panel">
-            <h2>@Localizer["housing.createLoan"]</h2>
-            <EditForm EditContext="loanEditContext" OnValidSubmit="HandleAddLoanAsync">
+            <h2>@Localizer["housing.oneTimeCost"]</h2>
+            <EditForm EditContext="costEditContext" OnValidSubmit="HandleAddCostAsync">
                 <DataAnnotationsValidator />
                 <ValidationSummary />
                 <div class="form-grid">
                     <div>
-                        <label class="form-label">@Localizer["field.name"]</label>
-                        <InputText class="form-control" @bind-Value="loanForm.Name" />
-                        <ValidationMessage For="() => loanForm.Name" />
+                        <label class="form-label">@Localizer["field.description"]</label>
+                        <InputText class="form-control" @bind-Value="costForm.Description" />
+                        <ValidationMessage For="() => costForm.Description" />
                     </div>
                     <div>
-                        <label class="form-label">@Localizer["housing.lender"]</label>
-                        <InputText class="form-control" @bind-Value="loanForm.Lender" />
-                        <ValidationMessage For="() => loanForm.Lender" />
+                        <label class="form-label">@Localizer["field.amount"]</label>
+                        <InputNumber class="form-control" @bind-Value="costForm.Amount" />
+                        <ValidationMessage For="() => costForm.Amount" />
                     </div>
                     <div>
-                        <label class="form-label">@Localizer["housing.loanStartDate"]</label>
-                        <InputDate class="form-control" @bind-Value="loanForm.LoanStartDate" />
-                        <ValidationMessage For="() => loanForm.LoanStartDate" />
+                        <label class="form-label">@Localizer["field.date"]</label>
+                        <InputDate class="form-control" @bind-Value="costForm.Date" />
+                        <ValidationMessage For="() => costForm.Date" />
                     </div>
                     <div>
-                        <label class="form-label">@Localizer["housing.initialLoanAmount"]</label>
-                        <InputNumber class="form-control" @bind-Value="loanForm.InitialLoanAmount" />
-                        <ValidationMessage For="() => loanForm.InitialLoanAmount" />
-                    </div>
-                    <div>
-                        <label class="form-label">@Localizer["housing.remainingDebt"]</label>
-                        <InputNumber class="form-control" @bind-Value="loanForm.RemainingDebt" />
-                        <ValidationMessage For="() => loanForm.RemainingDebt" />
+                        <label class="form-label">@Localizer["field.subcategory"]</label>
+                        <InputText class="form-control" @bind-Value="costForm.Subcategory" list="housing-cost-subcategories" />
+                        <datalist id="housing-cost-subcategories">
+                            @foreach (var subcategory in GetSubcategorySuggestions())
+                            {
+                                <option value="@subcategory"></option>
+                            }
+                        </datalist>
+                        <ValidationMessage For="() => costForm.Subcategory" />
                     </div>
                 </div>
-                <button class="btn btn-primary" type="submit">@Localizer["action.addLoan"]</button>
+                <button class="btn btn-primary" type="submit">@Localizer["action.addHousingCost"]</button>
             </EditForm>
         </section>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["housing.recurringCostsTab"]" Icon="@Icons.Material.Filled.Autorenew">
+        <section class="card-panel">
+            <h2>@Localizer["housing.series"]</h2>
+            <EditForm EditContext="definitionEditContext" OnValidSubmit="HandleAddDefinitionAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <div class="form-grid">
+                    <div>
+                        <label class="form-label">@Localizer["field.description"]</label>
+                        <InputText class="form-control" @bind-Value="definitionForm.Description" />
+                        <ValidationMessage For="() => definitionForm.Description" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.subcategory"]</label>
+                        <InputText class="form-control" @bind-Value="definitionForm.Subcategory" list="housing-definition-subcategories" />
+                        <datalist id="housing-definition-subcategories">
+                            @foreach (var subcategory in GetSubcategorySuggestions())
+                            {
+                                <option value="@subcategory"></option>
+                            }
+                        </datalist>
+                        <ValidationMessage For="() => definitionForm.Subcategory" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.amount"]</label>
+                        <InputNumber class="form-control" @bind-Value="definitionForm.Amount" />
+                        <ValidationMessage For="() => definitionForm.Amount" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.start"]</label>
+                        <InputDate class="form-control" @bind-Value="definitionForm.StartDate" />
+                        <ValidationMessage For="() => definitionForm.StartDate" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.end"]</label>
+                        <InputDate class="form-control" @bind-Value="definitionForm.EndDate" />
+                        <ValidationMessage For="() => definitionForm.EndDate" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.intervalMonths"]</label>
+                        <InputNumber class="form-control" @bind-Value="definitionForm.IntervalMonths" />
+                        <ValidationMessage For="() => definitionForm.IntervalMonths" />
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">@Localizer["action.addHousingDefinition"]</button>
+            </EditForm>
+        </section>
+
+        <section class="card-panel mt-4">
+            <h2>@Localizer["housing.definitions"]</h2>
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["field.description"]</th>
+                            <th>@Localizer["field.subcategory"]</th>
+                            <th>@Localizer["field.amount"]</th>
+                            <th>@Localizer["field.interval"]</th>
+                            <th>@Localizer["field.start"]</th>
+                            <th>@Localizer["field.end"]</th>
+                            <th>@Localizer["field.actions"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var definition in HousingDefinitions)
+                        {
+                            <tr>
+                                <td>@definition.Description</td>
+                                <td>@definition.Subcategory</td>
+                                <td>@AppState.FormatCurrency(definition.Amount)</td>
+                                <td>@GetIntervalLabel(definition.IntervalMonths)</td>
+                                <td>@GetMonthYearLabel(definition.StartYear, definition.StartMonth)</td>
+                                <td>@GetMonthYearLabel(definition.EndYear, definition.EndMonth)</td>
+                                <td>
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Color="Color.Error"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => HandleDeleteDefinitionAsync(definition))" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["housing.loansTab"]" Icon="@Icons.Material.Filled.AccountBalance">
+        <div class="stack-grid two-up">
+            <section class="card-panel">
+                <h2>@Localizer["housing.homeResidence"]</h2>
+                <EditForm EditContext="homeResidenceEditContext" OnValidSubmit="HandleSaveHomeResidenceAsync">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+                    <div class="form-grid">
+                        <div>
+                            <label class="form-label">@Localizer["housing.residenceType"]</label>
+                            <InputSelect class="form-select" @bind-Value="homeResidenceForm.ResidenceType">
+                                @foreach (var option in ResidenceTypeOptions)
+                                {
+                                    <option value="@option.Type">@Localizer[option.LabelKey]</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        @if (ShowsOwnedResidenceFields)
+                        {
+                            <div>
+                                <label class="form-label">@Localizer["housing.purchaseYear"]</label>
+                                <InputNumber class="form-control" @bind-Value="homeResidenceForm.PurchaseYear" />
+                                <ValidationMessage For="() => homeResidenceForm.PurchaseYear" />
+                            </div>
+                            <div>
+                                <label class="form-label">@Localizer["housing.purchasePrice"]</label>
+                                <InputNumber class="form-control" @bind-Value="homeResidenceForm.PurchasePrice" />
+                                <ValidationMessage For="() => homeResidenceForm.PurchasePrice" />
+                            </div>
+                            <div>
+                                <label class="form-label">@Localizer["housing.currentMarketValue"]</label>
+                                <InputNumber class="form-control" @bind-Value="homeResidenceForm.CurrentMarketValue" />
+                                <ValidationMessage For="() => homeResidenceForm.CurrentMarketValue" />
+                            </div>
+                        }
+                    </div>
+                    <button class="btn btn-primary" type="submit">@Localizer["action.save"]</button>
+                </EditForm>
+            </section>
+
+            <section class="card-panel">
+                <h2>@Localizer["housing.createLoan"]</h2>
+                <EditForm EditContext="loanEditContext" OnValidSubmit="HandleAddLoanAsync">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+                    <div class="form-grid">
+                        <div>
+                            <label class="form-label">@Localizer["field.name"]</label>
+                            <InputText class="form-control" @bind-Value="loanForm.Name" />
+                            <ValidationMessage For="() => loanForm.Name" />
+                        </div>
+                        <div>
+                            <label class="form-label">@Localizer["housing.lender"]</label>
+                            <InputText class="form-control" @bind-Value="loanForm.Lender" />
+                            <ValidationMessage For="() => loanForm.Lender" />
+                        </div>
+                        <div>
+                            <label class="form-label">@Localizer["housing.loanStartDate"]</label>
+                            <InputDate class="form-control" @bind-Value="loanForm.LoanStartDate" />
+                            <ValidationMessage For="() => loanForm.LoanStartDate" />
+                        </div>
+                        <div>
+                            <label class="form-label">@Localizer["housing.initialLoanAmount"]</label>
+                            <InputNumber class="form-control" @bind-Value="loanForm.InitialLoanAmount" />
+                            <ValidationMessage For="() => loanForm.InitialLoanAmount" />
+                        </div>
+                        <div>
+                            <label class="form-label">@Localizer["housing.remainingDebt"]</label>
+                            <InputNumber class="form-control" @bind-Value="loanForm.RemainingDebt" />
+                            <ValidationMessage For="() => loanForm.RemainingDebt" />
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">@Localizer["action.addLoan"]</button>
+                </EditForm>
+            </section>
+        </div>
 
         @if (!HousingLoans.Any())
         {
@@ -278,169 +232,156 @@
         }
         else
         {
-            @foreach (var loan in HousingLoans)
-            {
-                <section class="card-panel mt-4">
-                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-                        <div>
-                            <h2>@loan.Name</h2>
-                            <div class="form-grid">
-                                <div>
-                                    <label class="form-label">@Localizer["housing.lender"]</label>
-                                    <div>@loan.Lender</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["housing.loanStartDate"]</label>
-                                    <div>@FormatDate(loan.LoanStartDate)</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["housing.initialLoanAmount"]</label>
-                                    <div>@AppState.FormatCurrency(loan.InitialLoanAmount)</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["housing.remainingDebt"]</label>
-                                    <div>@AppState.FormatCurrency(loan.RemainingDebt)</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["housing.currentAmortization"]</label>
-                                    <div>@AppState.FormatCurrency(loan.CurrentAmortization)</div>
-                                </div>
-                            </div>
-                        </div>
-                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                       Color="Color.Error"
-                                       Size="Size.Small"
-                                       OnClick="@(() => HandleDeleteLoanAsync(loan))" />
-                    </div>
+            <section class="card-panel mt-4">
+                <div class="table-responsive">
+                    <table class="table app-table compact-overview-table">
+                        <thead>
+                            <tr>
+                                <th>@Localizer["field.name"]</th>
+                                <th>@Localizer["housing.lender"]</th>
+                                <th>@Localizer["housing.loanStartDate"]</th>
+                                <th>@Localizer["housing.remainingDebt"]</th>
+                                <th>@Localizer["field.actions"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var loan in HousingLoans)
+                            {
+                                <tr>
+                                    <td>@loan.Name</td>
+                                    <td>@loan.Lender</td>
+                                    <td>@FormatDate(loan.LoanStartDate)</td>
+                                    <td>@AppState.FormatCurrency(AppState.GetLoanCurrentBalance(loan.Id))</td>
+                                    <td>
+                                        <div class="button-row">
+                                            <button class="btn btn-outline-primary btn-sm" type="button" @onclick="() => ToggleLoanDetails(loan.Id)">Details</button>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Color="Color.Error"
+                                                           Size="Size.Small"
+                                                           OnClick="@(() => HandleDeleteLoanAsync(loan))" />
+                                        </div>
+                                    </td>
+                                </tr>
+                                @if (IsLoanExpanded(loan.Id))
+                                {
+                                    <tr class="row-detail">
+                                        <td colspan="5">
+                                            <div class="inline-detail-shell">
+                                                <div class="stack-grid two-up mt-4">
+                                                    <section class="card-panel">
+                                                        <h3>@Localizer["housing.interestBindingPeriods"]</h3>
+                                                        <EditForm EditContext="GetBindingPeriodEditContext(loan.Id)" OnValidSubmit="@(() => HandleAddBindingPeriodAsync(loan.Id))">
+                                                            <DataAnnotationsValidator />
+                                                            <ValidationSummary />
+                                                            <div class="form-grid">
+                                                                <div>
+                                                                    <label class="form-label">@Localizer["field.start"]</label>
+                                                                    <InputDate class="form-control" @bind-Value="GetBindingPeriodForm(loan.Id).StartDate" />
+                                                                    <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).StartDate)" />
+                                                                </div>
+                                                                <div>
+                                                                    <label class="form-label">@Localizer["field.end"]</label>
+                                                                    <InputDate class="form-control" @bind-Value="GetBindingPeriodForm(loan.Id).EndDate" />
+                                                                    <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).EndDate)" />
+                                                                </div>
+                                                                <div>
+                                                                    <label class="form-label">@Localizer["housing.interestRate"]</label>
+                                                                    <InputNumber class="form-control" @bind-Value="GetBindingPeriodForm(loan.Id).InterestRate" />
+                                                                    <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).InterestRate)" />
+                                                                </div>
+                                                                <div>
+                                                                    <label class="form-label">@Localizer["housing.monthlyAmortizationAmount"]</label>
+                                                                    <InputNumber class="form-control" @bind-Value="GetBindingPeriodForm(loan.Id).MonthlyAmortization" />
+                                                                    <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).MonthlyAmortization)" />
+                                                                </div>
+                                                            </div>
+                                                            <button class="btn btn-primary" type="submit">@Localizer["housing.createBindingPeriod"]</button>
+                                                        </EditForm>
 
-                    <div class="stack-grid two-up mt-4">
-                        <section class="card-panel">
-                            <h3>@Localizer["housing.interestBindingPeriods"]</h3>
-                            <EditForm EditContext="GetBindingPeriodEditContext(loan.Id)" OnValidSubmit="@(() => HandleAddBindingPeriodAsync(loan.Id))">
-                                <DataAnnotationsValidator />
-                                <ValidationSummary />
-                                <div class="form-grid">
-                                    <div>
-                                        <label class="form-label">@Localizer["field.start"]</label>
-                                        <InputDate class="form-control" @bind-Value="GetBindingPeriodForm(loan.Id).StartDate" />
-                                        <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).StartDate)" />
-                                    </div>
-                                    <div>
-                                        <label class="form-label">@Localizer["field.end"]</label>
-                                        <InputDate class="form-control" @bind-Value="GetBindingPeriodForm(loan.Id).EndDate" />
-                                        <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).EndDate)" />
-                                    </div>
-                                    <div>
-                                        <label class="form-label">@Localizer["housing.interestRate"]</label>
-                                        <InputNumber class="form-control" @bind-Value="GetBindingPeriodForm(loan.Id).InterestRate" />
-                                        <ValidationMessage For="@(() => GetBindingPeriodForm(loan.Id).InterestRate)" />
-                                    </div>
-                                </div>
-                                <button class="btn btn-primary" type="submit">@Localizer["housing.createBindingPeriod"]</button>
-                            </EditForm>
+                                                        <div class="table-responsive mt-4">
+                                                            <table class="table app-table">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>@Localizer["field.start"]</th>
+                                                                        <th>@Localizer["field.end"]</th>
+                                                                        <th>@Localizer["housing.interestRate"]</th>
+                                                                        <th>@Localizer["housing.monthlyAmortizationAmount"]</th>
+                                                                        <th>@Localizer["field.actions"]</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    @if (!GetLoanInterestBindingPeriods(loan.Id).Any())
+                                                                    {
+                                                                        <tr>
+                                                                            <td colspan="5" class="empty-state">@Localizer["housing.noBindingPeriods"]</td>
+                                                                        </tr>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        @foreach (var period in GetLoanInterestBindingPeriods(loan.Id))
+                                                                        {
+                                                                            <tr>
+                                                                                <td>@FormatDate(period.StartMonth)</td>
+                                                                                <td>@FormatDate(period.EndMonth)</td>
+                                                                                <td>@FormatInterestRate(period.InterestRate)</td>
+                                                                                <td>@AppState.FormatCurrency(period.MonthlyAmortization)</td>
+                                                                                <td>
+                                                                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                                                                   Color="Color.Error"
+                                                                                                   Size="Size.Small"
+                                                                                                   OnClick="@(() => HandleDeleteBindingPeriodAsync(period))" />
+                                                                                </td>
+                                                                            </tr>
+                                                                        }
+                                                                    }
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </section>
 
-                            <div class="table-responsive mt-4">
-                                <table class="table app-table">
-                                    <thead>
-                                        <tr>
-                                            <th>@Localizer["field.start"]</th>
-                                            <th>@Localizer["field.end"]</th>
-                                            <th>@Localizer["housing.interestRate"]</th>
-                                            <th>@Localizer["field.actions"]</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @if (!GetLoanInterestBindingPeriods(loan.Id).Any())
-                                        {
-                                            <tr>
-                                                <td colspan="4" class="empty-state">@Localizer["housing.noBindingPeriods"]</td>
-                                            </tr>
-                                        }
-                                        else
-                                        {
-                                            @foreach (var period in GetLoanInterestBindingPeriods(loan.Id))
-                                            {
-                                                <tr>
-                                                    <td>@FormatDate(period.StartDate)</td>
-                                                    <td>@FormatDate(period.EndDate)</td>
-                                                    <td>@FormatInterestRate(period.InterestRate)</td>
-                                                    <td>
-                                                        <button class="btn btn-outline-primary btn-sm me-2"
-                                                                @onclick="() => HandleUpdateBindingPeriodAsync(period)">
-                                                            @Localizer["action.update"]
-                                                        </button>
-                                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                                       Color="Color.Error"
-                                                                       Size="Size.Small"
-                                                                       OnClick="@(() => HandleDeleteBindingPeriodAsync(period))" />
-                                                    </td>
-                                                </tr>
-                                            }
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                        </section>
-
-                        <section class="card-panel">
-                            <h3>@Localizer["housing.amortization"]</h3>
-                            <EditForm EditContext="GetAmortizationPlanEditContext(loan.Id)" OnValidSubmit="@(() => HandleAddAmortizationAsync(loan.Id))">
-                                <DataAnnotationsValidator />
-                                <ValidationSummary />
-                                <div class="form-grid">
-                                    <div>
-                                        <label class="form-label">@Localizer["housing.amortizationMonth"]</label>
-                                        <InputDate class="form-control" @bind-Value="GetAmortizationPlanForm(loan.Id).Month" />
-                                        <ValidationMessage For="@(() => GetAmortizationPlanForm(loan.Id).Month)" />
-                                    </div>
-                                    <div>
-                                        <label class="form-label">@Localizer["housing.monthlyAmortizationAmount"]</label>
-                                        <InputNumber class="form-control" @bind-Value="GetAmortizationPlanForm(loan.Id).MonthlyAmortizationAmount" />
-                                        <ValidationMessage For="@(() => GetAmortizationPlanForm(loan.Id).MonthlyAmortizationAmount)" />
-                                    </div>
-                                </div>
-                                <button class="btn btn-primary" type="submit">@Localizer["housing.amortize"]</button>
-                            </EditForm>
-
-                            <div class="table-responsive mt-4">
-                                <table class="table app-table">
-                                    <thead>
-                                        <tr>
-                                            <th>@Localizer["housing.amortizationMonth"]</th>
-                                            <th>@Localizer["housing.monthlyAmortizationAmount"]</th>
-                                            <th>@Localizer["field.actions"]</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @if (!GetLoanAmortizationPlans(loan.Id).Any())
-                                        {
-                                            <tr>
-                                                <td colspan="3" class="empty-state">@Localizer["housing.noAmortizationPlans"]</td>
-                                            </tr>
-                                        }
-                                        else
-                                        {
-                                            @foreach (var plan in GetLoanAmortizationPlans(loan.Id))
-                                            {
-                                                <tr>
-                                                    <td>@FormatDate(plan.StartDate)</td>
-                                                    <td>@AppState.FormatCurrency(plan.MonthlyAmortizationAmount)</td>
-                                                    <td>
-                                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                                       Color="Color.Error"
-                                                                       Size="Size.Small"
-                                                                       OnClick="@(() => HandleDeleteAmortizationPlanAsync(plan))" />
-                                                    </td>
-                                                </tr>
-                                            }
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                        </section>
-                    </div>
-                </section>
-            }
+                                                    <section class="card-panel">
+                                                        <details>
+                                                            <summary class="btn btn-outline-primary btn-sm">@Localizer["table.balance"]</summary>
+                                                            <div class="table-responsive mt-3">
+                                                                <table class="table app-table">
+                                                                    <thead>
+                                                                        <tr>
+                                                                            <th>@Localizer["credits.month"]</th>
+                                                                            <th>@Localizer["table.balance"]</th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody>
+                                                                        @if (!GetBalanceEntries(loan.Id).Any())
+                                                                        {
+                                                                            <tr>
+                                                                                <td colspan="2" class="empty-state">@Localizer["table.noCostRows"]</td>
+                                                                            </tr>
+                                                                        }
+                                                                        else
+                                                                        {
+                                                                            @foreach (var balance in GetBalanceEntries(loan.Id))
+                                                                            {
+                                                                                <tr>
+                                                                                    <td>@($"{balance.Year:0000}/{balance.Month:00}")</td>
+                                                                                    <td>@AppState.FormatCurrency(balance.Balance)</td>
+                                                                                </tr>
+                                                                            }
+                                                                        }
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+                                                        </details>
+                                                    </section>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         }
     </MudTabPanel>
 </MudTabs>
@@ -451,13 +392,12 @@
     private HousingDefinitionFormModel definitionForm = new();
     private HousingLoanFormModel loanForm = new();
     private readonly Dictionary<Guid, LoanBindingPeriodFormModel> bindingPeriodForms = [];
-    private readonly Dictionary<Guid, LoanAmortizationPlanFormModel> amortizationPlanForms = [];
     private readonly Dictionary<Guid, EditContext> bindingPeriodEditContexts = [];
-    private readonly Dictionary<Guid, EditContext> amortizationPlanEditContexts = [];
     private EditContext homeResidenceEditContext = default!;
     private EditContext costEditContext = default!;
     private EditContext definitionEditContext = default!;
     private EditContext loanEditContext = default!;
+    private readonly HashSet<Guid> expandedLoanIds = [];
     private string? statusMessage;
     private bool showAllHousingCosts;
 
@@ -467,26 +407,6 @@
         new(HomeResidenceType.Condominium, "housing.residenceType.condominium"),
         new(HomeResidenceType.House, "housing.residenceType.house")
     ];
-
-    private static IReadOnlyList<DefinitionIntervalOption> DefinitionIntervals { get; } =
-    [
-        new(1, "interval.monthly"),
-        new(3, "interval.quarterly"),
-        new(6, "interval.semiAnnual"),
-        new(12, "interval.yearly")
-    ];
-
-    private IEnumerable<ExpenseEntry> HousingExpenses =>
-        AppState.Data.ExpenseRecords
-            .Where(record =>
-                showAllHousingCosts ||
-                (record.Category == ExpenseCategory.Housing &&
-                 record.Year == DateTime.Today.Year &&
-                 record.Month == DateTime.Today.Month))
-            .OrderByDescending(record => record.Year)
-            .ThenByDescending(record => record.Month)
-            .ThenBy(record => record.Subcategory)
-            .ThenBy(record => record.Description);
 
     private IEnumerable<HousingCostDefinition> HousingDefinitions =>
         AppState.Data.HousingDefinitions
@@ -500,6 +420,16 @@
             .ThenBy(loan => loan.Lender)
             .ThenBy(loan => loan.LoanStartDate)
             .ToList();
+
+    private bool IsLoanExpanded(Guid loanId) => expandedLoanIds.Contains(loanId);
+
+    private void ToggleLoanDetails(Guid loanId)
+    {
+        if (!expandedLoanIds.Add(loanId))
+        {
+            expandedLoanIds.Remove(loanId);
+        }
+    }
 
     private bool ShowsOwnedResidenceFields =>
         homeResidenceForm.ResidenceType is HomeResidenceType.Condominium or HomeResidenceType.House;
@@ -593,7 +523,7 @@
 
         try
         {
-            await AppState.AddLoanInterestBindingPeriodAsync(loanId, startDate, endDate, form.InterestRate);
+            await AppState.AddLoanInterestBindingPeriodAsync(loanId, startDate, endDate, form.InterestRate, form.MonthlyAmortization);
             bindingPeriodForms[loanId] = CreateBindingPeriodForm();
             bindingPeriodEditContexts[loanId] = new EditContext(bindingPeriodForms[loanId]);
             statusMessage = Localizer["housing.bindingPeriodAdded"];
@@ -604,36 +534,12 @@
         }
     }
 
-    private async Task HandleAddAmortizationAsync(Guid loanId)
-    {
-        var form = GetAmortizationPlanForm(loanId);
-        var month = DateOnly.FromDateTime(form.Month!.Value);
-
-        try
-        {
-            await AppState.AddHousingLoanAmortizationAsync(loanId, month, form.MonthlyAmortizationAmount);
-            amortizationPlanForms[loanId] = CreateAmortizationPlanForm(loanId);
-            amortizationPlanEditContexts[loanId] = new EditContext(amortizationPlanForms[loanId]);
-            statusMessage = Localizer["housing.amortizationPlanAdded"];
-        }
-        catch (InvalidOperationException)
-        {
-            statusMessage = Localizer["validation.loanAmortizationPlanOverlap"];
-        }
-    }
-
-    private async Task HandleUpdateBindingPeriodAsync(LoanInterestBindingPeriod period)
-    {
-        await AppState.UpdateHousingLoanInterestBindingPeriodAsync(period.Id);
-        statusMessage = Localizer["housing.bindingPeriodUpdated"];
-    }
-
     private async Task HandleDeleteExpenseAsync(ExpenseEntry expense)
     {
         var parameters = new DialogParameters<ConfirmDialog>
         {
             { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
-            { dialog => dialog.Message, string.Format(Localizer["housing.deleteCostMessage"], expense.Description) },
+            { dialog => dialog.Message, string.Format(Localizer["housing.deleteCostMessage"], AppState.GetExpenseDescriptionDisplay(expense)) },
             { dialog => dialog.ConfirmText, Localizer["action.delete"] },
             { dialog => dialog.CancelText, Localizer["action.cancel"] }
         };
@@ -705,8 +611,6 @@
         await AppState.RemoveHousingLoanAsync(loan.Id);
         bindingPeriodForms.Remove(loan.Id);
         bindingPeriodEditContexts.Remove(loan.Id);
-        amortizationPlanForms.Remove(loan.Id);
-        amortizationPlanEditContexts.Remove(loan.Id);
         statusMessage = Localizer["housing.loanDeleted"];
     }
 
@@ -715,7 +619,7 @@
         var parameters = new DialogParameters<ConfirmDialog>
         {
             { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
-            { dialog => dialog.Message, string.Format(Localizer["housing.deleteBindingPeriodMessage"], FormatDate(period.StartDate), FormatDate(period.EndDate)) },
+            { dialog => dialog.Message, string.Format(Localizer["housing.deleteBindingPeriodMessage"], FormatDate(period.StartMonth), FormatDate(period.EndMonth)) },
             { dialog => dialog.ConfirmText, Localizer["action.delete"] },
             { dialog => dialog.CancelText, Localizer["action.cancel"] }
         };
@@ -736,30 +640,10 @@
         statusMessage = Localizer["housing.bindingPeriodDeleted"];
     }
 
-    private async Task HandleDeleteAmortizationPlanAsync(LoanAmortizationPlan plan)
+    private Task HandleShowAllHousingCostsChanged(bool value)
     {
-        var parameters = new DialogParameters<ConfirmDialog>
-        {
-            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
-            { dialog => dialog.Message, string.Format(Localizer["housing.deleteAmortizationPlanMessage"], FormatDate(plan.StartDate), FormatDate(plan.EndDate)) },
-            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
-            { dialog => dialog.CancelText, Localizer["action.cancel"] }
-        };
-
-        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
-        if (dialog is null)
-        {
-            return;
-        }
-
-        var result = await dialog.Result;
-        if (result?.Canceled ?? true)
-        {
-            return;
-        }
-
-        await AppState.RemoveLoanAmortizationPlanAsync(plan.Id);
-        statusMessage = Localizer["housing.amortizationPlanDeleted"];
+        showAllHousingCosts = value;
+        return Task.CompletedTask;
     }
 
     private void ResetForms()
@@ -797,22 +681,10 @@
         return bindingPeriodForms[loanId];
     }
 
-    private LoanAmortizationPlanFormModel GetAmortizationPlanForm(Guid loanId)
-    {
-        EnsureLoanForms(loanId);
-        return amortizationPlanForms[loanId];
-    }
-
     private EditContext GetBindingPeriodEditContext(Guid loanId)
     {
         EnsureLoanForms(loanId);
         return bindingPeriodEditContexts[loanId];
-    }
-
-    private EditContext GetAmortizationPlanEditContext(Guid loanId)
-    {
-        EnsureLoanForms(loanId);
-        return amortizationPlanEditContexts[loanId];
     }
 
     private void EnsureLoanForms(Guid loanId)
@@ -823,11 +695,6 @@
             bindingPeriodEditContexts[loanId] = new EditContext(bindingPeriodForms[loanId]);
         }
 
-        if (!amortizationPlanForms.ContainsKey(loanId))
-        {
-            amortizationPlanForms[loanId] = CreateAmortizationPlanForm(loanId);
-            amortizationPlanEditContexts[loanId] = new EditContext(amortizationPlanForms[loanId]);
-        }
     }
 
     private static LoanBindingPeriodFormModel CreateBindingPeriodForm()
@@ -840,35 +707,15 @@
         };
     }
 
-    private LoanAmortizationPlanFormModel CreateAmortizationPlanForm(Guid loanId)
-    {
-        var today = DateTime.Today;
-        var latestAmount = GetLoanAmortizationPlans(loanId)
-            .OrderByDescending(plan => plan.StartDate)
-            .ThenByDescending(plan => plan.EndDate)
-            .Select(plan => plan.MonthlyAmortizationAmount)
-            .FirstOrDefault();
-
-        return new LoanAmortizationPlanFormModel
-        {
-            Month = new DateTime(today.Year, today.Month, 1),
-            MonthlyAmortizationAmount = latestAmount
-        };
-    }
-
     private IReadOnlyList<LoanInterestBindingPeriod> GetLoanInterestBindingPeriods(Guid loanId) =>
         AppState.Data.LoanInterestBindingPeriods
             .Where(period => period.LoanId == loanId)
-            .OrderBy(period => period.StartDate)
-            .ThenBy(period => period.EndDate)
+            .OrderBy(period => period.StartMonth)
+            .ThenBy(period => period.EndMonth)
             .ToList();
 
-    private IReadOnlyList<LoanAmortizationPlan> GetLoanAmortizationPlans(Guid loanId) =>
-        AppState.Data.LoanAmortizationPlans
-            .Where(plan => plan.LoanId == loanId)
-            .OrderByDescending(plan => plan.StartDate)
-            .ThenByDescending(plan => plan.EndDate)
-            .ToList();
+    private IReadOnlyList<MonthlyBalance> GetBalanceEntries(Guid entityId) =>
+        AppState.GetMonthlyBalances(entityId);
 
     private IReadOnlyList<string> GetSubcategorySuggestions() =>
         AppState.Data.ExpenseRecords
@@ -883,10 +730,14 @@
 
     private string GetIntervalLabel(int intervalMonths)
     {
-        var option = DefinitionIntervals.FirstOrDefault(item => item.Months == intervalMonths);
-        return option is not null
-            ? Localizer[option.LabelKey]
-            : string.Format(Localizer["housing.intervalFallback"], intervalMonths);
+        return intervalMonths switch
+        {
+            1 => Localizer["interval.monthly"],
+            3 => Localizer["interval.quarterly"],
+            6 => Localizer["interval.semiAnnual"],
+            12 => Localizer["interval.yearly"],
+            _ => string.Format(Localizer["housing.intervalFallback"], intervalMonths)
+        };
     }
 
     private string GetMonthYearLabel(int year, int month) => $"{Localizer[$"month.{month}"]} {year}";
@@ -902,8 +753,6 @@
         AppState.Changed -= HandleChanged;
         Localizer.Changed -= HandleChanged;
     }
-
-    private sealed record DefinitionIntervalOption(int Months, string LabelKey);
 
     private sealed record ResidenceTypeOption(HomeResidenceType Type, string LabelKey);
 
@@ -991,15 +840,9 @@
 
         [Range(typeof(decimal), "0.0001", "100", ErrorMessage = "Interest rate must be greater than zero.")]
         public decimal InterestRate { get; set; }
-    }
-
-    private sealed class LoanAmortizationPlanFormModel
-    {
-        [Required(ErrorMessage = "Month is required.")]
-        public DateTime? Month { get; set; }
 
         [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Monthly amortization amount must be greater than zero.")]
-        public decimal MonthlyAmortizationAmount { get; set; }
+        public decimal MonthlyAmortization { get; set; }
     }
 
 }

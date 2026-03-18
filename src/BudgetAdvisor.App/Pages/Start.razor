@@ -3,8 +3,6 @@
 @inject ApplicationState AppState
 @inject LocalizationService Localizer
 
-<PageTitle>Budget Advisor - @Localizer["nav.start"]</PageTitle>
-
 <section class="card-panel">
     <div class="section-title-row">
         <h2>@Localizer["start.latestMonth"]</h2>
@@ -20,9 +18,8 @@
         <div class="stat-card"><span>@Localizer["reporting.savings"]</span><strong>@AppState.FormatCurrency(overview.Savings)</strong></div>
         <div class="stat-card"><span>@Localizer["reporting.other"]</span><strong>@AppState.FormatCurrency(overview.Other)</strong></div>
         <div class="@GetBalanceCardClass()">
-            <span>@Localizer["reporting.balanceStatus"]</span>
-            <strong>@GetBalanceStatusText()</strong>
-            <small>@AppState.FormatCurrency(overview.NetChange)</small>
+            <span>@Localizer["table.balance"]</span>
+            <strong>@AppState.FormatCurrency(overview.NetChange)</strong>
         </div>
     </div>
 </section>
@@ -89,7 +86,7 @@
                         <td>@AppState.FormatCurrency(row.Savings)</td>
                         <td>@AppState.FormatCurrency(row.Interest)</td>
                         <td>@AppState.FormatCurrency(row.Amortization)</td>
-                        <td>@AppState.FormatCurrency(row.Balance)</td>
+                        <td class="@GetReportBalanceCellClass(row)">@AppState.FormatCurrency(row.Balance)</td>
                     </tr>
                 }
             </tbody>
@@ -108,9 +105,6 @@
     {
         AppState.Changed += Reload;
         Localizer.Changed += Reload;
-        var currentMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-        reportStartDate = currentMonth.AddMonths(-11);
-        reportEndDate = DateTime.Today;
         LoadData();
     }
 
@@ -119,8 +113,14 @@
         overview = AppState.GetMonthlyOverview(DateTime.Today.Year, DateTime.Today.Month);
         keyMetrics = AppState.GetCurrentDashboardKeyMetrics();
 
-        var start = reportStartDate ?? DateTime.Today;
-        var end = reportEndDate ?? DateTime.Today;
+        if (!reportStartDate.HasValue && !reportEndDate.HasValue)
+        {
+            reportRows = AppState.GetMonthlyReportRows();
+            return;
+        }
+
+        var start = reportStartDate ?? reportEndDate ?? DateTime.Today;
+        var end = reportEndDate ?? reportStartDate ?? DateTime.Today;
         reportRows = AppState.GetMonthlyReportRows(DateOnly.FromDateTime(start), DateOnly.FromDateTime(end));
     }
 
@@ -148,13 +148,32 @@
         return InvokeAsync(StateHasChanged);
     }
 
-    private bool IsBalanced() => overview.NetChange == 0m;
+    private string GetBalanceCardClass()
+        => $"stat-card stat-card-balance-{GetBalanceVariant(overview.Income, overview.NetChange)}";
 
-    private string GetBalanceStatusText() => IsBalanced() ? "OK" : "NOK";
+    private string GetReportBalanceCellClass(MonthlyReportRow row)
+        => $"report-balance-cell report-balance-{GetBalanceVariant(row.Income, row.Balance)}";
 
-    private string GetBalanceCardClass() => IsBalanced()
-        ? "stat-card stat-card-balance-ok"
-        : "stat-card stat-card-balance-nok";
+    private static string GetBalanceVariant(decimal income, decimal balance)
+    {
+        if (balance == 0m)
+        {
+            return "neutral";
+        }
+
+        if (balance > 0m)
+        {
+            return "success";
+        }
+
+        var negativeBalanceRatio = income <= 0m
+            ? 1m
+            : Math.Abs(balance) / income;
+
+        return negativeBalanceRatio < 0.30m
+            ? "warning"
+            : "error";
+    }
 
     private static string FormatPercentage(decimal value) => $"{value:P1}";
 

@@ -5,8 +5,6 @@
 @inject IDialogService DialogService
 @inject LocalizationService Localizer
 
-<PageTitle>Budget Advisor - @Localizer["nav.credits"]</PageTitle>
-
 @if (!string.IsNullOrWhiteSpace(statusMessage))
 {
     <div class="status-banner">@statusMessage</div>
@@ -24,6 +22,7 @@
                 <div class="stat-card"><span>@Localizer["credits.creditCount"]</span><strong>@CreditCount</strong></div>
                 <div class="stat-card"><span>@Localizer["credits.highestInterestRate"]</span><strong>@FormatRate(HighestInterestRate)</strong></div>
                 <div class="stat-card"><span>@Localizer["credits.lowestInterestRate"]</span><strong>@FormatRate(LowestInterestRate)</strong></div>
+                <div class="stat-card"><span>@Localizer["credits.previousMonthInterestCosts"]</span><strong>@AppState.FormatCurrency(PreviousMonthInterestCosts)</strong></div>
                 <div class="stat-card"><span>@Localizer["credits.totalCurrentDebt"]</span><strong>@AppState.FormatCurrency(TotalRemainingDebt)</strong></div>
                 <div class="stat-card"><span>@Localizer["credits.totalMaximumCredit"]</span><strong>@AppState.FormatCurrency(TotalCreditLimit)</strong></div>
             </div>
@@ -61,7 +60,7 @@
                                     <td>@FormatDate(credit.StartDate)</td>
                                     <td>@FormatRate(credit.MonthlyInterestRate)</td>
                                     <td>@AppState.FormatCurrency(credit.CreditLimit)</td>
-                                    <td>@AppState.FormatCurrency(credit.RemainingDebt)</td>
+                                    <td>@AppState.FormatCurrency(AppState.GetCreditCurrentBalance(credit.Id))</td>
                                     <td>@AppState.FormatCurrency(GetAvailableCredit(credit))</td>
                                 </tr>
                             }
@@ -85,85 +84,123 @@
         }
         else
         {
-            @foreach (var credit in Credits)
-            {
-                <section class="card-panel mt-4">
-                    <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-                        <div>
-                            <h2>@credit.Name</h2>
-                            <div class="form-grid">
-                                <div>
-                                    <label class="form-label">@Localizer["credits.provider"]</label>
-                                    <div>@credit.Provider</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["credits.startDate"]</label>
-                                    <div>@FormatDate(credit.StartDate)</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["credits.creditLimit"]</label>
-                                    <div>@AppState.FormatCurrency(credit.CreditLimit)</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["credits.remainingDebt"]</label>
-                                    <div>@AppState.FormatCurrency(credit.RemainingDebt)</div>
-                                </div>
-                                <div>
-                                    <label class="form-label">@Localizer["credits.monthlyInterestRate"]</label>
-                                    <div>@FormatRate(credit.MonthlyInterestRate)</div>
-                                </div>
-                            </div>
-                        </div>
+            <section class="card-panel">
+                <div class="table-responsive">
+                    <table class="table app-table compact-overview-table">
+                        <thead>
+                            <tr>
+                                <th>@Localizer["field.name"]</th>
+                                <th>@Localizer["credits.provider"]</th>
+                                <th>@Localizer["credits.remainingDebt"]</th>
+                                <th>@Localizer["credits.availableCredit"]</th>
+                                <th>@Localizer["field.actions"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var credit in Credits)
+                            {
+                                <tr>
+                                    <td>@credit.Name</td>
+                                    <td>@credit.Provider</td>
+                                    <td>@AppState.FormatCurrency(AppState.GetCreditCurrentBalance(credit.Id))</td>
+                                    <td>@AppState.FormatCurrency(GetAvailableCredit(credit))</td>
+                                    <td>
+                                        <div class="button-row">
+                                            <button class="btn btn-outline-primary btn-sm" type="button" @onclick="() => ToggleCreditDetails(credit.Id)">Details</button>
+                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleRegisterPurchaseAsync(credit)">@Localizer["credits.registerPurchase"]</button>
+                                            <button class="btn btn-outline-primary btn-sm" @onclick="() => HandlePostMonthAsync(credit)">@Localizer["credits.postMonth"]</button>
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Color="Color.Error"
+                                                           Size="Size.Small"
+                                                           OnClick="@(() => HandleDeleteCreditAsync(credit))" />
+                                        </div>
+                                    </td>
+                                </tr>
+                                @if (IsCreditExpanded(credit.Id))
+                                {
+                                    <tr class="row-detail">
+                                        <td colspan="5">
+                                            <div class="inline-detail-shell">
+                                                <section class="card-panel mt-4">
+                                                    <h3>@Localizer["credits.purchaseTable"]</h3>
+                                                    <div class="table-responsive">
+                                                        <table class="table app-table">
+                                                            <thead>
+                                                                <tr>
+                                                                    <th>@Localizer["credits.month"]</th>
+                                                                    <th>@Localizer["field.mainCategory"]</th>
+                                                                    <th>@Localizer["field.subcategory"]</th>
+                                                                    <th>@Localizer["field.amount"]</th>
+                                                                    <th>@Localizer["field.metadata"]</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                @if (!GetCreditEvents(credit.Id).Any())
+                                                                {
+                                                                    <tr>
+                                                                        <td colspan="5" class="empty-state">@Localizer["credits.noPurchases"]</td>
+                                                                    </tr>
+                                                                }
+                                                                else
+                                                                {
+                                                                    @foreach (var expense in GetCreditEvents(credit.Id))
+                                                                    {
+                                                                        <tr>
+                                                                            <td>@($"{expense.Year:0000}/{expense.Month:00}")</td>
+                                                                            <td>@Localizer[$"expenseCategory.{expense.Category}"]</td>
+                                                                            <td>@AppState.GetExpenseSubcategoryDisplay(expense)</td>
+                                                                            <td>@AppState.FormatCurrency(expense.Amount)</td>
+                                                                            <td>@AppState.GetExpenseMetadataDisplay(expense.Metadata)</td>
+                                                                        </tr>
+                                                                    }
+                                                                }
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </section>
 
-                        <div class="button-row">
-                            <button class="btn btn-outline-primary" @onclick="() => HandleRegisterPurchaseAsync(credit)">@Localizer["credits.registerPurchase"]</button>
-                            <button class="btn btn-outline-primary" @onclick="() => HandlePostMonthAsync(credit)">@Localizer["credits.postMonth"]</button>
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                           Color="Color.Error"
-                                           Size="Size.Small"
-                                           OnClick="@(() => HandleDeleteCreditAsync(credit))" />
-                        </div>
-                    </div>
-
-                    <section class="card-panel mt-4">
-                        <h3>@Localizer["credits.purchaseTable"]</h3>
-                        <div class="table-responsive">
-                            <table class="table app-table">
-                                <thead>
-                                    <tr>
-                                        <th>@Localizer["credits.month"]</th>
-                                        <th>@Localizer["field.mainCategory"]</th>
-                                        <th>@Localizer["field.subcategory"]</th>
-                                        <th>@Localizer["field.amount"]</th>
-                                        <th>@Localizer["field.metadata"]</th>
+                                                <section class="card-panel mt-4">
+                                                    <details>
+                                                        <summary class="btn btn-outline-primary btn-sm">@Localizer["table.balance"]</summary>
+                                                        <div class="table-responsive mt-3">
+                                                            <table class="table app-table">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>@Localizer["credits.month"]</th>
+                                                                        <th>@Localizer["table.balance"]</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    @if (!GetBalanceEntries(credit.Id).Any())
+                                                                    {
+                                                                        <tr>
+                                                                            <td colspan="2" class="empty-state">@Localizer["table.noCostRows"]</td>
+                                                                        </tr>
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        @foreach (var balance in GetBalanceEntries(credit.Id))
+                                                                        {
+                                                                            <tr>
+                                                                                <td>@($"{balance.Year:0000}/{balance.Month:00}")</td>
+                                                                                <td>@AppState.FormatCurrency(balance.Balance)</td>
+                                                                            </tr>
+                                                                        }
+                                                                    }
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </details>
+                                                </section>
+                                            </div>
+                                        </td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    @if (!GetCreditEvents(credit.Id).Any())
-                                    {
-                                        <tr>
-                                            <td colspan="5" class="empty-state">@Localizer["credits.noPurchases"]</td>
-                                        </tr>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var expense in GetCreditEvents(credit.Id))
-                                        {
-                                            <tr>
-                                                <td>@($"{expense.Year:0000}/{expense.Month:00}")</td>
-                                                <td>@Localizer[$"expenseCategory.{expense.Category}"]</td>
-                                                <td>@AppState.GetExpenseSubcategoryDisplay(expense)</td>
-                                                <td>@AppState.FormatCurrency(expense.Amount)</td>
-                                                <td>@AppState.GetExpenseMetadataDisplay(expense.Metadata)</td>
-                                            </tr>
-                                        }
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    </section>
-                </section>
-            }
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         }
     </MudTabPanel>
 </MudTabs>
@@ -178,6 +215,7 @@
         ExpenseCategory.Other
     ];
 
+    private readonly HashSet<Guid> expandedCreditIds = [];
     private string? statusMessage;
 
     private IReadOnlyList<Credit> Credits =>
@@ -190,8 +228,19 @@
     private int CreditCount => Credits.Count;
     private decimal HighestInterestRate => Credits.Count == 0 ? 0m : Credits.Max(credit => credit.MonthlyInterestRate);
     private decimal LowestInterestRate => Credits.Count == 0 ? 0m : Credits.Min(credit => credit.MonthlyInterestRate);
-    private decimal TotalRemainingDebt => Credits.Sum(credit => credit.RemainingDebt);
+    private decimal PreviousMonthInterestCosts => AppState.GetCreditInterestCostsForMonth(GetPreviousMonth());
+    private decimal TotalRemainingDebt => Credits.Sum(credit => AppState.GetCreditCurrentBalance(credit.Id));
     private decimal TotalCreditLimit => Credits.Sum(credit => credit.CreditLimit);
+
+    private bool IsCreditExpanded(Guid creditId) => expandedCreditIds.Contains(creditId);
+
+    private void ToggleCreditDetails(Guid creditId)
+    {
+        if (!expandedCreditIds.Add(creditId))
+        {
+            expandedCreditIds.Remove(creditId);
+        }
+    }
 
     protected override void OnInitialized()
     {
@@ -279,9 +328,19 @@
 
     private async Task HandlePostMonthAsync(Credit credit)
     {
+        var availableMonths = AppState.GetUnpostedCreditMonths(credit.Id)
+            .Select(month => month.ToDateTime(TimeOnly.MinValue))
+            .ToList();
+
+        if (availableMonths.Count == 0)
+        {
+            statusMessage = Localizer["credits.noUnpostedMonths"];
+            return;
+        }
+
         var parameters = new DialogParameters<PostCreditMonthDialog>
         {
-            { dialog => dialog.RemainingDebt, credit.RemainingDebt }
+            { dialog => dialog.AvailableMonths, availableMonths }
         };
 
         var dialog = await DialogService.ShowAsync<PostCreditMonthDialog>(Localizer["credits.postMonth"], parameters);
@@ -310,9 +369,11 @@
                 model.PayFullAmount);
             statusMessage = Localizer["credits.monthPosted"];
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException exception)
         {
-            statusMessage = Localizer["validation.creditAmortizationExceedsDebt"];
+            statusMessage = exception.Message.Contains("already been posted", StringComparison.OrdinalIgnoreCase)
+                ? Localizer["validation.creditMonthAlreadyPosted"]
+                : Localizer["validation.creditAmortizationExceedsDebt"];
         }
     }
 
@@ -364,13 +425,22 @@
             .OrderBy(value => value)
             .ToList();
 
+    private IReadOnlyList<MonthlyBalance> GetBalanceEntries(Guid entityId) =>
+        AppState.GetMonthlyBalances(entityId);
+
     private static string FormatDate(DateOnly date) => date.ToString("yyyy-MM-dd");
 
     private static string FormatRate(decimal rate) => $"{rate:0.##}%";
 
-    private decimal GetAvailableCredit(Credit credit) => Math.Max(credit.CreditLimit - credit.RemainingDebt, 0m);
+    private decimal GetAvailableCredit(Credit credit) => Math.Max(credit.CreditLimit - AppState.GetCreditCurrentBalance(credit.Id), 0m);
 
     private string GetCurrentMonthLabel() => $"{Localizer[$"month.{DateTime.Today.Month}"]} {DateTime.Today.Year}";
+
+    private static DateOnly GetPreviousMonth()
+    {
+        var previousMonth = DateOnly.FromDateTime(DateTime.Today).AddMonths(-1);
+        return new DateOnly(previousMonth.Year, previousMonth.Month, 1);
+    }
 
     private void HandleChanged() => InvokeAsync(StateHasChanged);
 
