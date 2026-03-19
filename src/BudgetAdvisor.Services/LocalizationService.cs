@@ -83,7 +83,7 @@ public sealed class LocalizationService
             throw new InvalidOperationException($"Language '{languageCode}' does not exist.");
         }
 
-        return await _localStorageService.BackupAsync($"{languageCode}.json", resourceSet);
+        return await _localStorageService.BackupAsync(BuildExportFileName(languageCode), resourceSet);
     }
 
     public async Task ImportLanguageAsync(string json)
@@ -115,4 +115,7 @@ public sealed class LocalizationService
     {
         await _localStorageService.SaveAsync(LocalizationKey, _resources.Values.OrderBy(set => set.LanguageCode).ToList());
     }
+
+    private static string BuildExportFileName(string baseName) =>
+        $"{baseName}-{DateTime.Now:yyyyMMddHHmm}.json";
 }

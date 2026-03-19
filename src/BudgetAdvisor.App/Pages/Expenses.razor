@@ -27,6 +27,16 @@
                         <ValidationMessage For="() => oneTimeExpenseForm.Description" />
                     </div>
                     <div>
+                        <label class="form-label">@Localizer["field.subcategory"]</label>
+                        <InputText class="form-control" @bind-Value="oneTimeExpenseForm.Subcategory" list="one-time-subcategories" />
+                        <datalist id="one-time-subcategories">
+                            @foreach (var subcategory in GetSubcategorySuggestions(oneTimeExpenseForm.Category))
+                            {
+                                <option value="@subcategory"></option>
+                            }
+                        </datalist>
+                    </div>
+                    <div>
                         <label class="form-label">@Localizer["field.amount"]</label>
                         <InputNumber class="form-control" @bind-Value="oneTimeExpenseForm.Amount" />
                         <ValidationMessage For="() => oneTimeExpenseForm.Amount" />
@@ -45,16 +55,6 @@
                             }
                         </InputSelect>
                     </div>
-                    <div>
-                        <label class="form-label">@Localizer["field.subcategory"]</label>
-                        <InputText class="form-control" @bind-Value="oneTimeExpenseForm.Subcategory" list="one-time-subcategories" />
-                        <datalist id="one-time-subcategories">
-                            @foreach (var subcategory in GetSubcategorySuggestions(oneTimeExpenseForm.Category))
-                            {
-                                <option value="@subcategory"></option>
-                            }
-                        </datalist>
-                    </div>
                 </div>
                 <button class="btn btn-primary" type="submit">@Localizer["action.addExpense"]</button>
             </EditForm>
@@ -69,9 +69,19 @@
                 <ValidationSummary />
                 <div class="form-grid">
                     <div>
-                        <label class="form-label">@Localizer["field.name"]</label>
+                        <label class="form-label">@Localizer["field.description"]</label>
                         <InputText class="form-control" @bind-Value="subscriptionForm.Name" />
                         <ValidationMessage For="() => subscriptionForm.Name" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.subcategory"]</label>
+                        <InputText class="form-control" @bind-Value="subscriptionForm.Subcategory" list="subscription-subcategories" />
+                        <datalist id="subscription-subcategories">
+                            @foreach (var subcategory in GetSubcategorySuggestions(subscriptionForm.Category))
+                            {
+                                <option value="@subcategory"></option>
+                            }
+                        </datalist>
                     </div>
                     <div>
                         <label class="form-label">@Localizer["field.amount"]</label>
@@ -102,16 +112,6 @@
                             }
                         </InputSelect>
                     </div>
-                    <div>
-                        <label class="form-label">@Localizer["field.subcategory"]</label>
-                        <InputText class="form-control" @bind-Value="subscriptionForm.Subcategory" list="subscription-subcategories" />
-                        <datalist id="subscription-subcategories">
-                            @foreach (var subcategory in GetSubcategorySuggestions(subscriptionForm.Category))
-                            {
-                                <option value="@subcategory"></option>
-                            }
-                        </datalist>
-                    </div>
                 </div>
                 <button class="btn btn-primary" type="submit">@Localizer["action.addSubscription"]</button>
             </EditForm>
@@ -129,7 +129,16 @@
                             <th>@Localizer["field.intervalMonths"]</th>
                             <th>@Localizer["field.start"]</th>
                             <th>@Localizer["field.end"]</th>
-                            <th>@Localizer["field.actions"]</th>
+                            <th>
+                                <div class="table-actions-header">
+                                    <span>@Localizer["field.actions"]</span>
+                                    <button class="btn btn-outline-secondary btn-sm"
+                                            @onclick="HandleArchiveExpiredSubscriptionsAsync"
+                                            title="@Localizer["action.archiveAll"]"
+                                            aria-label="@Localizer["action.archiveAll"]"
+                                            disabled="@(!HasExpiredSubscriptions())">🗄️</button>
+                                </div>
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -143,10 +152,20 @@
                                 <td>@GetMonthYearLabel(subscription.StartYear, subscription.StartMonth)</td>
                                 <td>@GetEndLabel(subscription)</td>
                                 <td>
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                   Color="Color.Error"
-                                                   Size="Size.Small"
-                                                   OnClick="@(() => HandleDeleteSubscriptionAsync(subscription))" />
+                                    <div class="button-row">
+                                        <button class="btn btn-outline-secondary btn-sm"
+                                                @onclick="() => HandleRenewSubscription(subscription)"
+                                                title="@Localizer["action.renew"]"
+                                                aria-label="@Localizer["action.renew"]">♻️</button>
+                                        <button class="btn btn-outline-secondary btn-sm"
+                                                @onclick="() => HandleArchiveSubscriptionAsync(subscription)"
+                                                title="@Localizer["action.archive"]"
+                                                aria-label="@Localizer["action.archive"]">🗄️</button>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => HandleDeleteSubscriptionAsync(subscription))" />
+                                    </div>
                                 </td>
                             </tr>
                         }
@@ -485,6 +504,69 @@
         statusMessage = Localizer["expenses.subscriptionDeleted"];
     }
 
+    private async Task HandleArchiveSubscriptionAsync(SubscriptionExpenseDefinition subscription)
+    {
+        await AppState.ArchiveSubscriptionAsync(subscription.Id);
+        statusMessage = Localizer["expenses.subscriptionArchived"];
+    }
+
+    private async Task HandleArchiveExpiredSubscriptionsAsync()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.archiveTitle"] },
+            { dialog => dialog.Message, Localizer["expenses.archiveExpiredSubscriptionsMessage"] },
+            { dialog => dialog.ConfirmText, Localizer["action.archiveAll"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Warning }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.archiveTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        var expiredSubscriptions = AppState.Data.Subscriptions.Where(IsExpiredSubscription).ToList();
+        var archivedCount = 0;
+
+        foreach (var subscription in expiredSubscriptions)
+        {
+            if (await AppState.ArchiveSubscriptionAsync(subscription.Id))
+            {
+                archivedCount++;
+            }
+        }
+
+        statusMessage = archivedCount > 0
+            ? string.Format(Localizer["definitions.archivedCount"], archivedCount)
+            : Localizer["definitions.noneArchived"];
+    }
+
+    private void HandleRenewSubscription(SubscriptionExpenseDefinition subscription)
+    {
+        var nextStartDate = new DateTime(subscription.EndYear!.Value, subscription.EndMonth!.Value, 1).AddMonths(1);
+        subscriptionForm = new SubscriptionExpenseFormModel
+        {
+            Name = subscription.Name,
+            Amount = subscription.Amount,
+            IntervalMonths = subscription.IntervalMonths,
+            StartDate = nextStartDate,
+            EndDate = null,
+            Category = subscription.Category,
+            Subcategory = subscription.Subcategory
+        };
+
+        subscriptionEditContext = new EditContext(subscriptionForm);
+        statusMessage = Localizer["definitions.renewPrepared"];
+    }
+
     private void ResetExpenseForms()
     {
         var today = DateTime.Today;
@@ -519,6 +601,13 @@
         subscription.EndYear.HasValue && subscription.EndMonth.HasValue
             ? GetMonthYearLabel(subscription.EndYear.Value, subscription.EndMonth.Value)
             : Localizer["common.openEnded"];
+
+    private bool HasExpiredSubscriptions() => AppState.Data.Subscriptions.Any(IsExpiredSubscription);
+
+    private static bool IsExpiredSubscription(SubscriptionExpenseDefinition subscription) =>
+        subscription.EndYear.HasValue &&
+        subscription.EndMonth.HasValue &&
+        new DateOnly(subscription.EndYear.Value, subscription.EndMonth.Value, 1) < new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
 
     private void HandleChanged()
     {

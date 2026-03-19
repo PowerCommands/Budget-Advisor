@@ -86,6 +86,15 @@
                             }
                         </tr>
                     }
+
+                    <tr class="table-summary-row">
+                        <td colspan="3" class="table-summary-label">@Localizer["table.sum"]</td>
+                        <td class="table-summary-value">@AppState.FormatCurrency(FilteredTotal)</td>
+                        @if (OnDelete.HasDelegate)
+                        {
+                            <td></td>
+                        }
+                    </tr>
                 }
             </tbody>
         </table>
@@ -122,6 +131,7 @@
     public bool DefaultToCurrentMonth { get; set; }
 
     private IReadOnlyList<ExpenseEntry> FilteredEntries => AppState.GetFilteredExpenseEntries(filter);
+    private decimal FilteredTotal => FilteredEntries.Sum(entry => entry.Amount);
 
     private IReadOnlyList<ExpenseFilterCategoryOption> CategoryOptions => AppState.GetExpenseFilterCategoryOptions(filter);
 

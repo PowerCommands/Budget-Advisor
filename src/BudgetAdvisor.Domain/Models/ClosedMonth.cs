@@ -6,5 +6,7 @@ public sealed class ClosedMonth
 
     public int Month { get; set; }
 
+    public Guid? GeneratedExpenseId { get; set; }
+
     public DateOnly ToDateOnly() => new(Year, Month, 1);
 }

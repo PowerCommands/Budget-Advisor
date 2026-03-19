@@ -30,6 +30,8 @@ public sealed class ExpenseEntry
 
     public Guid? LoanAmortizationPlanId { get; set; }
 
+    public bool LoanBalanceNeutral { get; set; }
+
     public Guid? TransportLeasingContractId { get; set; }
 
     public Guid? TransportVehicleId { get; set; }

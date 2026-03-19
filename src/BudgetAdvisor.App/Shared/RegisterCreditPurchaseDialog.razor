@@ -3,17 +3,15 @@
 
 <MudDialog>
     <DialogContent>
-        <MudText Typo="Typo.h6">@Localizer["credits.registerPurchase"]</MudText>
-
         <EditForm EditContext="editContext" OnValidSubmit="HandleSubmit">
             <DataAnnotationsValidator />
             <ValidationSummary />
 
             <div class="form-grid mt-3">
                 <div>
-                    <label class="form-label">@Localizer["credits.purchaseDate"]</label>
-                    <InputDate class="form-control" @bind-Value="model.Date" />
-                    <ValidationMessage For="() => model.Date" />
+                    <label class="form-label">@Localizer["field.description"]</label>
+                    <InputText class="form-control" @bind-Value="model.Description" />
+                    <ValidationMessage For="() => model.Description" />
                 </div>
                 <div>
                     <label class="form-label">@Localizer["field.mainCategory"]</label>
@@ -26,11 +24,6 @@
                     <ValidationMessage For="() => model.Category" />
                 </div>
                 <div>
-                    <label class="form-label">@Localizer["credits.purchaseAmount"]</label>
-                    <InputNumber class="form-control" @bind-Value="model.Amount" />
-                    <ValidationMessage For="() => model.Amount" />
-                </div>
-                <div>
                     <label class="form-label">@Localizer["field.subcategory"]</label>
                     <InputText class="form-control" @bind-Value="model.Subcategory" list="credit-purchase-subcategories" />
                     <datalist id="credit-purchase-subcategories">
@@ -40,6 +33,16 @@
                         }
                     </datalist>
                     <ValidationMessage For="() => model.Subcategory" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["credits.purchaseAmount"]</label>
+                    <InputNumber class="form-control" @bind-Value="model.Amount" />
+                    <ValidationMessage For="() => model.Amount" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["credits.purchaseDate"]</label>
+                    <InputDate class="form-control" @bind-Value="model.Date" />
+                    <ValidationMessage For="() => model.Date" />
                 </div>
             </div>
         </EditForm>
@@ -85,6 +88,10 @@
 
     public sealed class RegisterCreditPurchaseDialogModel
     {
+        [Required(ErrorMessage = "Description is required.")]
+        [StringLength(100, ErrorMessage = "Description must be 100 characters or fewer.")]
+        public string Description { get; set; } = string.Empty;
+
         [Required(ErrorMessage = "Date is required.")]
         public DateTime? Date { get; set; }
 

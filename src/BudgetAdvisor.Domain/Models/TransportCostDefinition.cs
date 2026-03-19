@@ -18,5 +18,7 @@ public sealed class TransportCostDefinition
 
     public int EndMonth { get; set; }
 
+    public string Description { get; set; } = string.Empty;
+
     public string Subcategory { get; set; } = string.Empty;
 }

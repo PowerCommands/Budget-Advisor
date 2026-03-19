@@ -108,6 +108,7 @@
 @code {
     private readonly HashSet<Guid> expandedAccountIds = [];
     private string? statusMessage;
+    private bool showAllPeriods;
     private string returnsNameFilter = string.Empty;
     private string transactionTypeFilter = string.Empty;
     private string returnsTypeFilter = string.Empty;
@@ -195,8 +196,11 @@
                     <table class="table app-table compact-overview-table">
                         <thead>
                             <tr>
+                                <th class="expander-column"></th>
                                 <th>@Localizer["field.name"]</th>
                                 <th>@GetProviderColumnLabel(accountType)</th>
+                                <th>@Localizer["field.status"]</th>
+                                <th>@Localizer["savings.returnColumn"]</th>
                                 <th>@Localizer["table.balance"]</th>
                                 <th>@Localizer["savings.openingBalance"]</th>
                                 <th>@Localizer["field.actions"]</th>
@@ -206,13 +210,20 @@
                             @foreach (var account in GetAccounts(accountType))
                             {
                                 <tr>
+                                    <td class="expander-column">
+                                        <MudIconButton Icon="@(IsAccountExpanded(account.Id) ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                                                       Size="Size.Small"
+                                                       Color="Color.Primary"
+                                                       OnClick="@(() => ToggleAccountDetails(account.Id))" />
+                                    </td>
                                     <td>@account.AccountName</td>
                                     <td>@GetProviderDisplay(account, accountType)</td>
+                                    <td>@(HasActivePeriod(account.Id) ? "✔️" : "✖️")</td>
+                                    <td>@GetActiveReturnDisplay(account)</td>
                                     <td>@AppState.FormatCurrency(AppState.GetSavingsAccountCurrentBalance(account.Id))</td>
                                     <td>@AppState.FormatCurrency(account.OpeningBalance)</td>
                                     <td>
                                         <div class="button-row">
-                                            <button class="btn btn-outline-primary btn-sm" type="button" @onclick="() => ToggleAccountDetails(account.Id)">Details</button>
                                             <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleDepositAsync(account)">@Localizer["savings.deposit"]</button>
                                             <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleWithdrawalAsync(account)">@Localizer["savings.withdrawal"]</button>
                                             <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleAddPeriodAsync(account)">@Localizer["savings.addPeriod"]</button>
@@ -226,10 +237,16 @@
                                 @if (IsAccountExpanded(account.Id))
                                 {
                                     <tr class="row-detail">
-                                        <td colspan="5">
+                                        <td colspan="8">
                                             <div class="inline-detail-shell">
                                                 <section class="card-panel mt-4">
-                                                    <h3>@Localizer["savings.periods"]</h3>
+                                                    <div class="section-title-row">
+                                                        <h3>@Localizer["savings.periods"]</h3>
+                                                        <label class="form-check-label d-flex align-items-center gap-2">
+                                                            <InputCheckbox class="form-check-input mt-0" @bind-Value="showAllPeriods" />
+                                                            <span>@Localizer["filter.showAll"]</span>
+                                                        </label>
+                                                    </div>
                                                     <div class="table-responsive">
                                                         <table class="table app-table">
                                                             <thead>
@@ -245,7 +262,7 @@
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
-                                                                @if (!GetPeriods(account.Id).Any())
+                                                                @if (!GetVisiblePeriods(account.Id).Any())
                                                                 {
                                                                     <tr>
                                                                         <td colspan="@(accountType == SavingsAccountType.Bank ? 5 : 4)" class="empty-state">@Localizer["savings.noPeriods"]</td>
@@ -253,7 +270,7 @@
                                                                 }
                                                                 else
                                                                 {
-                                                                    @foreach (var period in GetPeriods(account.Id))
+                                                                    @foreach (var period in GetVisiblePeriods(account.Id))
                                                                     {
                                                                         <tr>
                                                                             <td>@period.StartDate.ToString("yyyy-MM-dd")</td>
@@ -336,6 +353,36 @@
             .ThenBy(period => period.EndDate)
             .ToList();
 
+    private IReadOnlyList<SavingsReturnPeriod> GetVisiblePeriods(Guid accountId)
+    {
+        var periods = GetPeriods(accountId);
+        if (showAllPeriods)
+        {
+            return periods;
+        }
+
+        var activePeriod = GetActivePeriod(accountId);
+        return activePeriod is null ? [] : [activePeriod];
+    }
+
+    private SavingsReturnPeriod? GetActivePeriod(Guid accountId)
+    {
+        var currentMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+        return GetPeriods(accountId)
+            .Where(period => CoversMonth(period.StartDate, period.EndDate, currentMonth))
+            .OrderByDescending(period => period.StartDate)
+            .ThenByDescending(period => period.EndDate)
+            .FirstOrDefault();
+    }
+
+    private bool HasActivePeriod(Guid accountId) => GetActivePeriod(accountId) is not null;
+
+    private string GetActiveReturnDisplay(SavingsAccount account)
+    {
+        var activePeriod = GetActivePeriod(account.Id);
+        return activePeriod is null ? "-" : $"{activePeriod.RatePercent:0.##}%";
+    }
+
     private IReadOnlyList<MonthlyBalance> GetBalanceEntries(Guid entityId) =>
         AppState.GetMonthlyBalances(entityId);
 
@@ -372,6 +419,11 @@
             "Stock" => Localizer["savings.stocksTab"],
             _ => type
         };
+
+    private static bool CoversMonth(DateOnly startDate, DateOnly endDate, DateOnly month) =>
+        NormalizeMonth(startDate) <= month && month <= NormalizeMonth(endDate);
+
+    private static DateOnly NormalizeMonth(DateOnly date) => new(date.Year, date.Month, 1);
 
     private bool IsAccountExpanded(Guid accountId) => expandedAccountIds.Contains(accountId);
 

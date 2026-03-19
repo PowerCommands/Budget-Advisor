@@ -79,7 +79,19 @@
                     <th>@Localizer["table.interest"]</th>
                     <th>@Localizer["table.amortization"]</th>
                     <th>@Localizer["table.balance"]</th>
-                    <th>@Localizer["field.actions"]</th>
+                    <th>
+                        <div class="report-actions-header">
+                            <span>@Localizer["field.actions"]</span>
+                            <div class="report-actions-header-buttons">
+                                <button class="btn btn-outline-primary btn-sm"
+                                        @onclick="HandleCloseAllMonthsAsync"
+                                        disabled="@(!reportRows.Any(row => !row.IsClosed))">@Localizer["action.markAllClosed"]</button>
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        @onclick="HandleUndoAllMonthsAsync"
+                                        disabled="@(!reportRows.Any(row => row.IsClosed))">@Localizer["action.undoAllClosed"]</button>
+                            </div>
+                        </div>
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -96,9 +108,16 @@
                         <td>@AppState.FormatCurrency(row.Amortization)</td>
                         <td class="@GetReportBalanceCellClass(row)">@AppState.FormatCurrency(row.Balance)</td>
                         <td>
-                            <button class="btn btn-outline-primary btn-sm"
-                                    @onclick="() => HandleCloseMonthAsync(new DateOnly(row.Year, row.Month, 1))"
-                                    disabled="@row.IsClosed">@Localizer["action.markClosed"]</button>
+                            @if (row.IsClosed)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm"
+                                        @onclick="() => HandleUndoCloseMonthAsync(new DateOnly(row.Year, row.Month, 1))">@Localizer["action.undo"]</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-outline-primary btn-sm"
+                                        @onclick="() => HandleCloseMonthAsync(new DateOnly(row.Year, row.Month, 1))">@Localizer["action.markClosed"]</button>
+                            }
                         </td>
                     </tr>
                 }
@@ -196,6 +215,66 @@
             : Localizer["closeMonth.alreadyClosed"];
     }
 
+    private async Task HandleUndoCloseMonthAsync(DateOnly month)
+    {
+        statusMessage = null;
+
+        var wasUndone = await AppState.UndoCloseMonthAsync(month);
+        statusMessage = wasUndone
+            ? Localizer["closeMonth.undone"]
+            : Localizer["closeMonth.notClosed"];
+    }
+
+    private async Task HandleCloseAllMonthsAsync()
+    {
+        statusMessage = null;
+
+        var openMonths = reportRows
+            .Where(row => !row.IsClosed)
+            .OrderBy(row => row.Year)
+            .ThenBy(row => row.Month)
+            .Select(row => new DateOnly(row.Year, row.Month, 1))
+            .ToList();
+
+        var affectedCount = 0;
+        foreach (var month in openMonths)
+        {
+            if (await AppState.CloseMonthAsync(month, CloseMonthSurplusAction.DoNothing))
+            {
+                affectedCount++;
+            }
+        }
+
+        statusMessage = affectedCount > 0
+            ? string.Format(Localizer["closeMonth.bulkClosed"], affectedCount)
+            : Localizer["closeMonth.alreadyClosed"];
+    }
+
+    private async Task HandleUndoAllMonthsAsync()
+    {
+        statusMessage = null;
+
+        var closedMonths = reportRows
+            .Where(row => row.IsClosed)
+            .OrderByDescending(row => row.Year)
+            .ThenByDescending(row => row.Month)
+            .Select(row => new DateOnly(row.Year, row.Month, 1))
+            .ToList();
+
+        var affectedCount = 0;
+        foreach (var month in closedMonths)
+        {
+            if (await AppState.UndoCloseMonthAsync(month))
+            {
+                affectedCount++;
+            }
+        }
+
+        statusMessage = affectedCount > 0
+            ? string.Format(Localizer["closeMonth.bulkUndone"], affectedCount)
+            : Localizer["closeMonth.notClosed"];
+    }
+
     private string GetBalanceCardClass()
         => $"stat-card stat-card-balance-{GetBalanceVariant(budgetOverview.Income, budgetOverview.NetChange)}";
 
@@ -250,3 +329,20 @@
         Localizer.Changed -= Reload;
     }
 }
+
+<style>
+    .report-actions-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .report-actions-header-buttons {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+</style>

@@ -42,6 +42,13 @@
             <div class="status-banner mb-3">@validationMessage</div>
         }
 
+        <div class="form-grid mb-3">
+            <div>
+                <label class="form-label">@Localizer["field.description"]</label>
+                <InputText class="form-control" @bind-Value="descriptionFilter" />
+            </div>
+        </div>
+
         <div class="table-responsive">
             <table class="table app-table">
                 <thead>
@@ -55,11 +62,12 @@
                         <th>@Localizer["field.category"]</th>
                         <th>@Localizer["field.subcategory"]</th>
                         <th>@Localizer["expenses.import.recurring"]</th>
+                        <th>@Localizer["field.start"]</th>
                         <th>@Localizer["field.endDate"]</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var row in rows)
+                    @foreach (var row in FilteredRows)
                     {
                         <tr class="@(row.IsLeaving ? "bank-import-row-leaving" : string.Empty)">
                             <td>
@@ -92,6 +100,11 @@
                             </td>
                             <td>
                                 <InputCheckbox @bind-Value="row.IsRecurring" disabled="@isImporting" />
+                            </td>
+                            <td>
+                                <InputDate class="form-control"
+                                           @bind-Value="row.StartDate"
+                                           disabled="@(!row.IsRecurring || isImporting)" />
                             </td>
                             <td>
                                 <InputDate class="form-control"
@@ -138,6 +151,7 @@
     private readonly List<ImportPreviewRowModel> rows = [];
     private readonly List<string> importStatuses = [];
     private string? validationMessage;
+    private string descriptionFilter = string.Empty;
     private bool selectAllRows = true;
     private bool isImporting;
     private int totalSelectedCount;
@@ -148,6 +162,13 @@
             ? 0
             : importedCount * 100d / totalSelectedCount;
 
+    private IReadOnlyList<ImportPreviewRowModel> FilteredRows =>
+        rows
+            .Where(row =>
+                string.IsNullOrWhiteSpace(descriptionFilter) ||
+                row.Description.Contains(descriptionFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
     protected override void OnInitialized()
     {
         rows.Clear();
@@ -156,12 +177,13 @@
             Include = true,
             Description = transaction.Description,
             TransactionDate = transaction.TransactionDate,
+            StartDate = transaction.TransactionDate.ToDateTime(TimeOnly.MinValue),
             Amount = transaction.Amount,
             Category = ExpenseCategory.Other,
             Subcategory = string.Empty
         }));
 
-        selectAllRows = rows.All(row => row.Include);
+        selectAllRows = FilteredRows.Count > 0 && FilteredRows.All(row => row.Include);
     }
 
     private async Task SubmitAsync()
@@ -187,9 +209,21 @@
             return;
         }
 
+        if (selectedRows.Any(row => row.IsRecurring && !row.StartDate.HasValue))
+        {
+            validationMessage = Localizer["expenses.import.validation.startDateRequired"];
+            return;
+        }
+
         if (selectedRows.Any(row => row.IsRecurring && row.EndDate.HasValue && DateOnly.FromDateTime(row.EndDate.Value) < row.TransactionDate))
         {
             validationMessage = Localizer["expenses.import.validation.endDateBeforeTransaction"];
+            return;
+        }
+
+        if (selectedRows.Any(row => row.IsRecurring && row.StartDate.HasValue && row.EndDate.HasValue && DateOnly.FromDateTime(row.EndDate.Value) < DateOnly.FromDateTime(row.StartDate.Value)))
+        {
+            validationMessage = Localizer["expenses.import.validation.endDateBeforeStartDate"];
             return;
         }
 
@@ -206,6 +240,7 @@
             var draft = new ImportedExpenseDraft
             {
                 Date = row.TransactionDate,
+                StartDate = row.StartDate.HasValue ? DateOnly.FromDateTime(row.StartDate.Value) : null,
                 EndDate = row.EndDate.HasValue ? DateOnly.FromDateTime(row.EndDate.Value) : null,
                 Amount = row.Amount,
                 IsRecurring = row.IsRecurring,
@@ -234,7 +269,7 @@
 
     private Task HandleSelectAllRowsChanged()
     {
-        foreach (var row in rows)
+        foreach (var row in FilteredRows)
         {
             row.Include = selectAllRows;
         }
@@ -244,7 +279,7 @@
 
     private Task HandleRowIncludeChanged(ImportPreviewRowModel row)
     {
-        selectAllRows = rows.Count > 0 && rows.All(item => item.Include);
+        selectAllRows = FilteredRows.Count > 0 && FilteredRows.All(item => item.Include);
         return InvokeAsync(StateHasChanged);
     }
 
@@ -263,6 +298,8 @@
         public decimal Amount { get; set; }
 
         public bool IsRecurring { get; set; }
+
+        public DateTime? StartDate { get; set; }
 
         public DateTime? EndDate { get; set; }
 

@@ -24,16 +24,6 @@
                         <ValidationMessage For="() => costForm.Description" />
                     </div>
                     <div>
-                        <label class="form-label">@Localizer["field.amount"]</label>
-                        <InputNumber class="form-control" @bind-Value="costForm.Amount" />
-                        <ValidationMessage For="() => costForm.Amount" />
-                    </div>
-                    <div>
-                        <label class="form-label">@Localizer["field.date"]</label>
-                        <InputDate class="form-control" @bind-Value="costForm.Date" />
-                        <ValidationMessage For="() => costForm.Date" />
-                    </div>
-                    <div>
                         <label class="form-label">@Localizer["field.subcategory"]</label>
                         <InputText class="form-control" @bind-Value="costForm.Subcategory" list="housing-cost-subcategories" />
                         <datalist id="housing-cost-subcategories">
@@ -43,6 +33,16 @@
                             }
                         </datalist>
                         <ValidationMessage For="() => costForm.Subcategory" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.amount"]</label>
+                        <InputNumber class="form-control" @bind-Value="costForm.Amount" />
+                        <ValidationMessage For="() => costForm.Amount" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.date"]</label>
+                        <InputDate class="form-control" @bind-Value="costForm.Date" />
+                        <ValidationMessage For="() => costForm.Date" />
                     </div>
                 </div>
                 <button class="btn btn-primary" type="submit">@Localizer["action.addHousingCost"]</button>
@@ -110,7 +110,16 @@
                             <th>@Localizer["field.interval"]</th>
                             <th>@Localizer["field.start"]</th>
                             <th>@Localizer["field.end"]</th>
-                            <th>@Localizer["field.actions"]</th>
+                            <th>
+                                <div class="table-actions-header">
+                                    <span>@Localizer["field.actions"]</span>
+                                    <button class="btn btn-outline-secondary btn-sm"
+                                            @onclick="HandleArchiveExpiredDefinitionsAsync"
+                                            title="@Localizer["action.archiveAll"]"
+                                            aria-label="@Localizer["action.archiveAll"]"
+                                            disabled="@(!HasExpiredDefinitions())">🗄️</button>
+                                </div>
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -124,10 +133,20 @@
                                 <td>@GetMonthYearLabel(definition.StartYear, definition.StartMonth)</td>
                                 <td>@GetMonthYearLabel(definition.EndYear, definition.EndMonth)</td>
                                 <td>
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                   Color="Color.Error"
-                                                   Size="Size.Small"
-                                                   OnClick="@(() => HandleDeleteDefinitionAsync(definition))" />
+                                    <div class="button-row">
+                                        <button class="btn btn-outline-secondary btn-sm"
+                                                @onclick="() => HandleRenewDefinition(definition)"
+                                                title="@Localizer["action.renew"]"
+                                                aria-label="@Localizer["action.renew"]">♻️</button>
+                                        <button class="btn btn-outline-secondary btn-sm"
+                                                @onclick="() => HandleArchiveDefinitionAsync(definition)"
+                                                title="@Localizer["action.archive"]"
+                                                aria-label="@Localizer["action.archive"]">🗄️</button>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => HandleDeleteDefinitionAsync(definition))" />
+                                    </div>
                                 </td>
                             </tr>
                         }
@@ -227,9 +246,13 @@
                     <table class="table app-table compact-overview-table">
                         <thead>
                             <tr>
+                                <th class="expander-column"></th>
                                 <th>@Localizer["field.name"]</th>
                                 <th>@Localizer["housing.lender"]</th>
-                                <th>@Localizer["housing.loanStartDate"]</th>
+                                <th>@Localizer["loans.bindingPeriod"]</th>
+                                <th>@Localizer["field.status"]</th>
+                                <th>@Localizer["table.interest"]</th>
+                                <th>@Localizer["housing.currentAmortization"]</th>
                                 <th>@Localizer["housing.remainingDebt"]</th>
                                 <th>@Localizer["field.actions"]</th>
                             </tr>
@@ -238,13 +261,22 @@
                             @foreach (var loan in HousingLoans)
                             {
                                 <tr>
+                                    <td class="expander-column">
+                                        <MudIconButton Icon="@(IsLoanExpanded(loan.Id) ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                                                       Size="Size.Small"
+                                                       Color="Color.Primary"
+                                                       OnClick="@(() => ToggleLoanDetails(loan.Id))" />
+                                    </td>
                                     <td>@loan.Name</td>
                                     <td>@loan.Lender</td>
-                                    <td>@FormatDate(loan.LoanStartDate)</td>
+                                    <td>@GetActiveBindingPeriodDisplay(loan.Id)</td>
+                                    <td>@(HasActiveBindingPeriod(loan.Id) ? "✔️" : "✖️")</td>
+                                    <td>@GetActiveBindingRateDisplay(loan.Id)</td>
+                                    <td>@GetActiveAmortizationDisplay(loan.Id)</td>
                                     <td>@AppState.FormatCurrency(AppState.GetLoanCurrentBalance(loan.Id))</td>
                                     <td>
                                         <div class="button-row">
-                                            <button class="btn btn-outline-primary btn-sm" type="button" @onclick="() => ToggleLoanDetails(loan.Id)">Details</button>
+                                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => HandleBackfillLoanAmortizationAsync(loan.Id)">@Localizer["loans.backfillAmortization"]</button>
                                             <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                                            Color="Color.Error"
                                                            Size="Size.Small"
@@ -255,11 +287,17 @@
                                 @if (IsLoanExpanded(loan.Id))
                                 {
                                     <tr class="row-detail">
-                                        <td colspan="5">
+                                        <td colspan="9">
                                             <div class="inline-detail-shell">
                                                 <div class="stack-grid two-up mt-4">
                                                     <section class="card-panel">
-                                                        <h3>@Localizer["housing.interestBindingPeriods"]</h3>
+                                                        <div class="section-title-row">
+                                                            <h3>@Localizer["housing.interestBindingPeriods"]</h3>
+                                                            <label class="form-check-label d-flex align-items-center gap-2">
+                                                                <InputCheckbox class="form-check-input mt-0" @bind-Value="showAllHousingBindingPeriods" />
+                                                                <span>@Localizer["filter.showAll"]</span>
+                                                            </label>
+                                                        </div>
                                                         <EditForm EditContext="GetBindingPeriodEditContext(loan.Id)" OnValidSubmit="@(() => HandleAddBindingPeriodAsync(loan.Id))">
                                                             <DataAnnotationsValidator />
                                                             <ValidationSummary />
@@ -300,7 +338,7 @@
                                                                     </tr>
                                                                 </thead>
                                                                 <tbody>
-                                                                    @if (!GetLoanInterestBindingPeriods(loan.Id).Any())
+                                                                    @if (!GetVisibleLoanInterestBindingPeriods(loan.Id).Any())
                                                                     {
                                                                         <tr>
                                                                             <td colspan="5" class="empty-state">@Localizer["housing.noBindingPeriods"]</td>
@@ -308,7 +346,7 @@
                                                                     }
                                                                     else
                                                                     {
-                                                                        @foreach (var period in GetLoanInterestBindingPeriods(loan.Id))
+                                                                        @foreach (var period in GetVisibleLoanInterestBindingPeriods(loan.Id))
                                                                         {
                                                                             <tr>
                                                                                 <td>@FormatDate(period.StartMonth)</td>
@@ -400,6 +438,7 @@
     private readonly HashSet<Guid> expandedLoanIds = [];
     private string? statusMessage;
     private bool showAllHousingCosts;
+    private bool showAllHousingBindingPeriods;
 
     private static IReadOnlyList<ResidenceTypeOption> ResidenceTypeOptions { get; } =
     [
@@ -586,6 +625,68 @@
         statusMessage = Localizer["housing.definitionDeleted"];
     }
 
+    private async Task HandleArchiveDefinitionAsync(HousingCostDefinition definition)
+    {
+        await AppState.ArchiveHousingDefinitionAsync(definition.Id);
+        statusMessage = Localizer["housing.definitionArchived"];
+    }
+
+    private async Task HandleArchiveExpiredDefinitionsAsync()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.archiveTitle"] },
+            { dialog => dialog.Message, Localizer["housing.archiveExpiredDefinitionsMessage"] },
+            { dialog => dialog.ConfirmText, Localizer["action.archiveAll"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Warning }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.archiveTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        var expiredDefinitions = AppState.Data.HousingDefinitions.Where(IsExpiredDefinition).ToList();
+        var archivedCount = 0;
+
+        foreach (var definition in expiredDefinitions)
+        {
+            if (await AppState.ArchiveHousingDefinitionAsync(definition.Id))
+            {
+                archivedCount++;
+            }
+        }
+
+        statusMessage = archivedCount > 0
+            ? string.Format(Localizer["definitions.archivedCount"], archivedCount)
+            : Localizer["definitions.noneArchived"];
+    }
+
+    private void HandleRenewDefinition(HousingCostDefinition definition)
+    {
+        var nextStartDate = new DateTime(definition.EndYear, definition.EndMonth, 1).AddMonths(1);
+        definitionForm = new HousingDefinitionFormModel
+        {
+            Description = definition.Description,
+            Subcategory = definition.Subcategory,
+            Amount = definition.Amount,
+            IntervalMonths = definition.IntervalMonths,
+            StartDate = nextStartDate,
+            EndDate = null
+        };
+
+        definitionEditContext = new EditContext(definitionForm);
+        statusMessage = Localizer["definitions.renewPrepared"];
+    }
+
     private async Task HandleDeleteLoanAsync(HousingLoan loan)
     {
         var parameters = new DialogParameters<ConfirmDialog>
@@ -612,6 +713,45 @@
         bindingPeriodForms.Remove(loan.Id);
         bindingPeriodEditContexts.Remove(loan.Id);
         statusMessage = Localizer["housing.loanDeleted"];
+    }
+
+    private async Task HandleBackfillLoanAmortizationAsync(Guid loanId)
+    {
+        var parameters = new DialogParameters<BackfillLoanAmortizationDialog>
+        {
+            { dialog => dialog.InitialAmortizationAmount, GetSuggestedBackfillAmortizationAmount(loanId) },
+            { dialog => dialog.InitialInterestAmount, GetSuggestedBackfillInterestAmount(loanId) }
+        };
+
+        var dialog = await DialogService.ShowAsync<BackfillLoanAmortizationDialog>(Localizer["loans.backfillAmortization"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not BackfillLoanAmortizationDialog.BackfillLoanAmortizationDialogModel model ||
+            !model.StartDate.HasValue ||
+            !model.EndDate.HasValue)
+        {
+            return;
+        }
+
+        var createdCount = await AppState.BackfillLoanExpensesAsync(
+            loanId,
+            DateOnly.FromDateTime(model.StartDate.Value),
+            DateOnly.FromDateTime(model.EndDate.Value),
+            model.MonthlyAmortizationAmount,
+            model.MonthlyInterestAmount);
+
+        statusMessage = createdCount > 0
+            ? string.Format(Localizer["loans.backfillCompleted"], createdCount)
+            : Localizer["loans.backfillNothingCreated"];
     }
 
     private async Task HandleDeleteBindingPeriodAsync(LoanInterestBindingPeriod period)
@@ -662,6 +802,11 @@
         definitionEditContext = new EditContext(definitionForm);
         loanEditContext = new EditContext(loanForm);
     }
+
+    private bool HasExpiredDefinitions() => AppState.Data.HousingDefinitions.Any(IsExpiredDefinition);
+
+    private static bool IsExpiredDefinition(HousingCostDefinition definition) =>
+        new DateOnly(definition.EndYear, definition.EndMonth, 1) < new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
 
     private HomeResidenceFormModel CreateHomeResidenceForm()
     {
@@ -714,19 +859,72 @@
             .ThenBy(period => period.EndMonth)
             .ToList();
 
+    private IReadOnlyList<LoanInterestBindingPeriod> GetVisibleLoanInterestBindingPeriods(Guid loanId)
+    {
+        var periods = GetLoanInterestBindingPeriods(loanId);
+        if (showAllHousingBindingPeriods)
+        {
+            return periods;
+        }
+
+        var activePeriod = GetActiveLoanInterestBindingPeriod(loanId);
+        return activePeriod is null ? [] : [activePeriod];
+    }
+
+    private LoanInterestBindingPeriod? GetActiveLoanInterestBindingPeriod(Guid loanId)
+    {
+        var currentMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+        return GetLoanInterestBindingPeriods(loanId)
+            .Where(period => CoversMonth(period.StartMonth, period.EndMonth, currentMonth))
+            .OrderByDescending(period => period.StartMonth)
+            .ThenByDescending(period => period.EndMonth)
+            .FirstOrDefault();
+    }
+
+    private bool HasActiveBindingPeriod(Guid loanId) => GetActiveLoanInterestBindingPeriod(loanId) is not null;
+
+    private string GetActiveBindingRateDisplay(Guid loanId)
+    {
+        var activePeriod = GetActiveLoanInterestBindingPeriod(loanId);
+        return activePeriod is null ? "-" : FormatInterestRate(activePeriod.InterestRate);
+    }
+
+    private string GetActiveAmortizationDisplay(Guid loanId)
+    {
+        var activePeriod = GetActiveLoanInterestBindingPeriod(loanId);
+        return activePeriod is null ? "-" : AppState.FormatCurrency(activePeriod.MonthlyAmortization);
+    }
+
+    private decimal GetSuggestedBackfillAmortizationAmount(Guid loanId)
+    {
+        var activePeriod = GetActiveLoanInterestBindingPeriod(loanId);
+        return activePeriod?.MonthlyAmortization ?? HousingLoans.FirstOrDefault(loan => loan.Id == loanId)?.CurrentAmortization ?? 0m;
+    }
+
+    private decimal GetSuggestedBackfillInterestAmount(Guid loanId)
+    {
+        _ = loanId;
+        return 0m;
+    }
+
+    private string GetActiveBindingPeriodDisplay(Guid loanId)
+    {
+        var activePeriod = GetActiveLoanInterestBindingPeriod(loanId);
+        return activePeriod is null
+            ? "-"
+            : $"{FormatYearMonth(activePeriod.StartMonth)}\u2014{FormatYearMonth(activePeriod.EndMonth)}";
+    }
+
+    private static bool CoversMonth(DateOnly startDate, DateOnly endDate, DateOnly month) =>
+        NormalizeMonth(startDate) <= month && month <= NormalizeMonth(endDate);
+
+    private static DateOnly NormalizeMonth(DateOnly date) => new(date.Year, date.Month, 1);
+
     private IReadOnlyList<MonthlyBalance> GetBalanceEntries(Guid entityId) =>
         AppState.GetMonthlyBalances(entityId);
 
     private IReadOnlyList<string> GetSubcategorySuggestions() =>
-        AppState.Data.ExpenseRecords
-            .Where(record => record.Category == ExpenseCategory.Housing && !string.IsNullOrWhiteSpace(record.Subcategory))
-            .Select(record => record.Subcategory.Trim())
-            .Concat(AppState.Data.HousingDefinitions
-                .Where(record => !string.IsNullOrWhiteSpace(record.Subcategory))
-                .Select(record => record.Subcategory.Trim()))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(value => value)
-            .ToList();
+        AppState.GetExpenseSubcategorySuggestions(ExpenseCategory.Housing);
 
     private string GetIntervalLabel(int intervalMonths)
     {
@@ -743,6 +941,8 @@
     private string GetMonthYearLabel(int year, int month) => $"{Localizer[$"month.{month}"]} {year}";
 
     private static string FormatDate(DateOnly date) => date.ToString("yyyy-MM-dd");
+
+    private static string FormatYearMonth(DateOnly date) => date.ToString("yyyy/MM");
 
     private static string FormatInterestRate(decimal rate) => $"{rate:0.##}%";
 
@@ -838,7 +1038,7 @@
         [Required(ErrorMessage = "End date is required.")]
         public DateTime? EndDate { get; set; }
 
-        [Range(typeof(decimal), "0.0001", "100", ErrorMessage = "Interest rate must be greater than zero.")]
+        [Range(typeof(decimal), "0.00", "100", ErrorMessage = "Interest rate must be zero or greater.")]
         public decimal InterestRate { get; set; }
 
         [Range(typeof(decimal), "0.00", "999999999", ErrorMessage = "Monthly amortization amount must be zero or greater.")]

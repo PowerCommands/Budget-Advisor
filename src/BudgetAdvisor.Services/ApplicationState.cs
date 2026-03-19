@@ -178,9 +178,53 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.added", "log.entity.salaryPeriod", GetMember(memberId).Name));
     }
 
+    public async Task<bool> UpdateIncomeAmountAsync(Guid incomeId, decimal amount)
+    {
+        if (amount <= 0m)
+        {
+            throw new InvalidOperationException("Income amount must be greater than zero.");
+        }
+
+        var income = Data.IncomeRecords.FirstOrDefault(entry => entry.Id == incomeId);
+        if (income is null)
+        {
+            return false;
+        }
+
+        if (income.Amount == amount)
+        {
+            return false;
+        }
+
+        income.Amount = amount;
+
+        if (income.AssetId.HasValue)
+        {
+            var asset = Data.Assets.FirstOrDefault(item => item.Id == income.AssetId.Value && item.SaleIncomeEntryId == income.Id);
+            if (asset is not null)
+            {
+                asset.SaleAmount = amount;
+            }
+        }
+
+        if (income.SavingsAccountId.HasValue)
+        {
+            await RecalculateSavingsBalancesAsync();
+            await LogActivityAsync(
+                BuildLogDescription(_localizer["nav.household"], _localizer["household.incomesTab"]),
+                BuildLogActivity("log.verb.updated", "log.entity.income", BuildIncomeLogSubject(income.MemberId, income.Type)));
+            return true;
+        }
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.incomesTab"]),
+            BuildLogActivity("log.verb.updated", "log.entity.income", BuildIncomeLogSubject(income.MemberId, income.Type)));
+        return true;
+    }
+
     public async Task AddOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null)
     {
-        Data.ExpenseRecords.Add(CreateOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId));
+        _ = AddOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId);
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
@@ -203,13 +247,14 @@ public sealed class ApplicationState
 
         if (draft.IsRecurring && draft.EndDate.HasValue)
         {
+            var startDate = draft.StartDate ?? draft.Date;
             Data.Subscriptions.Add(new SubscriptionExpenseDefinition
             {
                 Name = draft.Description.Trim(),
                 Amount = draft.Amount,
                 IntervalMonths = 1,
-                StartYear = draft.Date.Year,
-                StartMonth = draft.Date.Month,
+                StartYear = startDate.Year,
+                StartMonth = startDate.Month,
                 EndYear = draft.EndDate.Value.Year,
                 EndMonth = draft.EndDate.Value.Month,
                 Category = draft.Category,
@@ -296,7 +341,7 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.added", "log.entity.housingDefinition", definition.Description));
     }
 
-    public async Task AddTransportDefinitionAsync(decimal amount, int intervalMonths, int startYear, int startMonth, int endYear, int endMonth, string subcategory, Guid vehicleId)
+    public async Task AddTransportDefinitionAsync(decimal amount, int intervalMonths, int startYear, int startMonth, int endYear, int endMonth, string subcategory, string description, Guid vehicleId)
     {
         var vehicle = GetTransportVehicle(vehicleId);
         var definition = new TransportCostDefinition
@@ -308,6 +353,7 @@ public sealed class ApplicationState
             StartMonth = startMonth,
             EndYear = endYear,
             EndMonth = endMonth,
+            Description = description.Trim(),
             Subcategory = subcategory.Trim()
         };
 
@@ -323,7 +369,7 @@ public sealed class ApplicationState
                 Category = ExpenseCategory.Transport,
                 Subcategory = definition.Subcategory,
                 Metadata = vehicle.Name.Trim(),
-                Description = definition.Subcategory,
+                Description = definition.Description,
                 TransportDefinitionId = definition.Id,
                 TransportVehicleId = vehicleId
             });
@@ -331,7 +377,7 @@ public sealed class ApplicationState
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.transport"], _localizer["transport.recurringCostsTab"]),
-            BuildLogActivity("log.verb.added", "log.entity.transportDefinition", vehicle.Name));
+            BuildLogActivity("log.verb.added", "log.entity.transportDefinition", string.IsNullOrWhiteSpace(definition.Description) ? vehicle.Name : definition.Description));
     }
 
     public async Task AddHousingLoanAsync(string name, string lender, DateOnly loanStartDate, decimal initialLoanAmount, decimal remainingDebt)
@@ -356,6 +402,11 @@ public sealed class ApplicationState
 
     public async Task AddLoanInterestBindingPeriodAsync(Guid loanId, DateOnly startDate, DateOnly endDate, decimal interestRate, decimal monthlyAmortization)
     {
+        if (interestRate < 0m)
+        {
+            throw new InvalidOperationException("Interest rate must not be negative.");
+        }
+
         ValidateAnyLoanExists(loanId);
         ValidateNoMonthOverlap(
             startDate,
@@ -403,6 +454,84 @@ public sealed class ApplicationState
                 Data.HousingLoans.Any(loan => loan.Id == loanId) ? _localizer["nav.housingTab"] : _localizer["nav.transport"],
                 Data.HousingLoans.Any(loan => loan.Id == loanId) ? _localizer["housing.loansTab"] : _localizer["transport.loansTab"]),
             BuildLogActivity("log.verb.added", "log.entity.amortizationPlan", FormatMonthRange(startDate, endDate)));
+    }
+
+    public async Task<int> BackfillLoanExpensesAsync(Guid loanId, DateOnly startDate, DateOnly endDate, decimal monthlyAmortizationAmount, decimal monthlyInterestAmount)
+    {
+        ValidateAnyLoanExists(loanId);
+
+        if (monthlyAmortizationAmount <= 0m && monthlyInterestAmount <= 0m)
+        {
+            throw new InvalidOperationException("At least one monthly amount must be greater than zero.");
+        }
+
+        var normalizedStart = NormalizeMonth(startDate);
+        var normalizedEnd = NormalizeMonth(endDate);
+        if (normalizedEnd < normalizedStart)
+        {
+            (normalizedStart, normalizedEnd) = (normalizedEnd, normalizedStart);
+        }
+
+        var isHousingLoan = Data.HousingLoans.Any(loan => loan.Id == loanId);
+        var category = isHousingLoan ? ExpenseCategory.Housing : ExpenseCategory.Transport;
+        var lender = Data.HousingLoans.FirstOrDefault(loan => loan.Id == loanId)?.Lender
+            ?? Data.TransportLoans.First(loan => loan.Id == loanId).Lender;
+        var vehicleId = Data.TransportLoans.FirstOrDefault(loan => loan.Id == loanId)?.VehicleId;
+        var metadata = category == ExpenseCategory.Transport ? GetTransportVehicleName(vehicleId) : null;
+
+        Data.ExpenseRecords.RemoveAll(expense =>
+            expense.LoanId == loanId &&
+            expense.LoanBalanceNeutral &&
+            expense.Subcategory is AmortizationSubcategory or InterestSubcategory &&
+            NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) >= normalizedStart &&
+            NormalizeMonth(new DateOnly(expense.Year, expense.Month, 1)) <= normalizedEnd);
+
+        var createdCount = 0;
+
+        foreach (var month in EnumerateMonths(normalizedStart.Year, normalizedStart.Month, normalizedEnd.Year, normalizedEnd.Month))
+        {
+            if (monthlyAmortizationAmount > 0m)
+            {
+                Data.ExpenseRecords.Add(CreateLoanExpenseEntry(
+                    loanId,
+                    lender,
+                    category,
+                    month,
+                    AmortizationSubcategory,
+                    monthlyAmortizationAmount,
+                    null,
+                    null,
+                    metadata,
+                    vehicleId,
+                    loanBalanceNeutral: true));
+                createdCount++;
+            }
+
+            if (monthlyInterestAmount > 0m)
+            {
+                Data.ExpenseRecords.Add(CreateLoanExpenseEntry(
+                    loanId,
+                    lender,
+                    category,
+                    month,
+                    InterestSubcategory,
+                    monthlyInterestAmount,
+                    null,
+                    null,
+                    metadata,
+                    vehicleId,
+                    loanBalanceNeutral: true));
+                createdCount++;
+            }
+        }
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(
+                isHousingLoan ? _localizer["nav.housingTab"] : _localizer["nav.transport"],
+                isHousingLoan ? _localizer["housing.loansTab"] : _localizer["transport.loansTab"]),
+            BuildLogActivity("log.verb.registered", "log.entity.expense", $"{_localizer["loans.backfillActionLabel"]} {FormatMonthRange(normalizedStart, normalizedEnd)}"));
+
+        return createdCount;
     }
 
     public async Task AddHousingLoanAmortizationAsync(Guid loanId, DateOnly month, decimal monthlyAmortizationAmount)
@@ -536,6 +665,13 @@ public sealed class ApplicationState
             throw new InvalidOperationException("Backfill start balance cannot exceed the current balance.");
         }
 
+        if (backfillDeposits &&
+            normalizedCreatedMonth == normalizedCurrentPeriod &&
+            normalizedBackfillStartBalance != currentBalance)
+        {
+            throw new InvalidOperationException("Start balance must match current balance when the backfill period is the same month.");
+        }
+
         var account = new SavingsAccount
         {
             AccountType = accountType,
@@ -562,13 +698,21 @@ public sealed class ApplicationState
         var amountToBackfill = currentBalance - normalizedBackfillStartBalance;
         if (amountToBackfill > 0m)
         {
-            var months = EnumerateMonths(
-                    normalizedCreatedMonth.Year,
-                    normalizedCreatedMonth.Month,
+            var distributionStartMonth = normalizedCreatedMonth.AddMonths(1);
+            var months = distributionStartMonth > normalizedCurrentPeriod
+                ? []
+                : EnumerateMonths(
+                    distributionStartMonth.Year,
+                    distributionStartMonth.Month,
                     normalizedCurrentPeriod.Year,
                     normalizedCurrentPeriod.Month)
-                .Select(month => month.ToDateOnly())
-                .ToList();
+                    .Select(month => month.ToDateOnly())
+                    .ToList();
+
+            if (months.Count == 0)
+            {
+                throw new InvalidOperationException("At least one later month is required to distribute the balance difference.");
+            }
 
             var distributedAmounts = DistributeEvenlyAcrossPeriods(amountToBackfill, months.Count);
             for (var index = 0; index < months.Count; index++)
@@ -639,7 +783,7 @@ public sealed class ApplicationState
             return;
         }
 
-        Data.ExpenseRecords.Add(CreateSavingsDepositExpenseEntry(account, date, amount));
+        _ = AddSavingsDepositExpenseEntry(account, date, amount);
 
         await RecalculateSavingsAccountBalancesAsync(account.Id, NormalizeMonth(date));
         await LogActivityAsync(
@@ -911,7 +1055,7 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.saved", "log.entity.home", _localizer[$"housing.residenceType.{residenceType}"]));
     }
 
-    public async Task AddCreditPurchaseAsync(Guid creditId, DateOnly purchaseDate, decimal amount, ExpenseCategory category, string subcategory)
+    public async Task AddCreditPurchaseAsync(Guid creditId, DateOnly purchaseDate, decimal amount, ExpenseCategory category, string subcategory, string description)
     {
         var credit = GetCredit(creditId);
         if (amount <= 0m)
@@ -927,6 +1071,7 @@ public sealed class ApplicationState
         }
 
         var normalizedSubcategory = subcategory.Trim();
+        var normalizedDescription = description.Trim();
         Data.ExpenseRecords.Add(new ExpenseEntry
         {
             Amount = amount,
@@ -935,7 +1080,7 @@ public sealed class ApplicationState
             Category = category,
             Subcategory = normalizedSubcategory,
             Metadata = CreditMetadata,
-            Description = normalizedSubcategory,
+            Description = normalizedDescription,
             CreditId = credit.Id,
             CreditCostSource = CreditCostSource.ManualPurchase
         });
@@ -1413,6 +1558,7 @@ public sealed class ApplicationState
             return false;
         }
 
+        Guid? generatedExpenseId = null;
         var surplus = GetMonthlyIncome(normalizedMonth.Year, normalizedMonth.Month) - GetMonthlyExpenses(normalizedMonth.Year, normalizedMonth.Month);
         if (surplus <= 0m)
         {
@@ -1425,7 +1571,7 @@ public sealed class ApplicationState
             case CloseMonthSurplusAction.DoNothing:
                 break;
             case CloseMonthSurplusAction.RegisterExpense:
-                await AddOneTimeExpenseAsync(
+                generatedExpenseId = await AddGeneratedOneTimeExpenseAsync(
                     surplus,
                     normalizedMonth.Year,
                     normalizedMonth.Month,
@@ -1434,10 +1580,10 @@ public sealed class ApplicationState
                     string.Empty);
                 break;
             case CloseMonthSurplusAction.DepositToBankSavings:
-                await AddSurplusDepositAsync(normalizedMonth, surplus, savingsAccountId, SavingsAccountType.Bank);
+                generatedExpenseId = await AddSurplusDepositAsync(normalizedMonth, surplus, savingsAccountId, SavingsAccountType.Bank);
                 break;
             case CloseMonthSurplusAction.DepositToFundSavings:
-                await AddSurplusDepositAsync(normalizedMonth, surplus, savingsAccountId, SavingsAccountType.Fund);
+                generatedExpenseId = await AddSurplusDepositAsync(normalizedMonth, surplus, savingsAccountId, SavingsAccountType.Fund);
                 break;
             default:
                 throw new InvalidOperationException("The selected surplus action is not supported.");
@@ -1451,7 +1597,8 @@ public sealed class ApplicationState
         Data.ClosedMonths.Add(new ClosedMonth
         {
             Year = normalizedMonth.Year,
-            Month = normalizedMonth.Month
+            Month = normalizedMonth.Month,
+            GeneratedExpenseId = generatedExpenseId
         });
 
         NormalizeClosedMonths();
@@ -1459,6 +1606,30 @@ public sealed class ApplicationState
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.start"], _localizer["start.monthlyReport"]),
             BuildLogActivity("log.verb.closed", "log.entity.closedMonth", $"{normalizedMonth:yyyy-MM}"));
+
+        return true;
+    }
+
+    public async Task<bool> UndoCloseMonthAsync(DateOnly month)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        var closedMonth = Data.ClosedMonths.FirstOrDefault(item => item.Year == normalizedMonth.Year && item.Month == normalizedMonth.Month);
+        if (closedMonth is null)
+        {
+            return false;
+        }
+
+        if (closedMonth.GeneratedExpenseId.HasValue)
+        {
+            await RemoveExpenseAsync(closedMonth.GeneratedExpenseId.Value);
+        }
+
+        Data.ClosedMonths.RemoveAll(item => item.Year == normalizedMonth.Year && item.Month == normalizedMonth.Month);
+        NormalizeClosedMonths();
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.start"], _localizer["start.monthlyReport"]),
+            BuildLogActivity("log.verb.reopened", "log.entity.closedMonth", $"{normalizedMonth:yyyy-MM}"));
 
         return true;
     }
@@ -1718,7 +1889,7 @@ public sealed class ApplicationState
         return rows.OrderByDescending(row => row.Period, StringComparer.Ordinal).ToList();
     }
 
-    public async Task<string> ExportAsync() => await _localStorageService.BackupAsync("budget-advisor-backup.json", Data);
+    public async Task<string> ExportAsync() => await _localStorageService.BackupAsync(BuildExportFileName("budget-advisor-backup"), Data);
 
     public async Task ImportAsync(string json)
     {
@@ -1732,6 +1903,9 @@ public sealed class ApplicationState
         NormalizeData();
         await PersistAndNotifyAsync();
     }
+
+    private static string BuildExportFileName(string baseName) =>
+        $"{baseName}-{DateTime.Now:yyyyMMddHHmm}.json";
 
     public async Task SetCurrencyAsync(string currencyCode)
     {
@@ -1853,6 +2027,21 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.deleted", "log.entity.recurringExpense", subscription?.Name ?? subscriptionId.ToString()));
     }
 
+    public async Task<bool> ArchiveSubscriptionAsync(Guid subscriptionId)
+    {
+        var subscription = Data.Subscriptions.FirstOrDefault(item => item.Id == subscriptionId);
+        if (subscription is null)
+        {
+            return false;
+        }
+
+        Data.Subscriptions.RemoveAll(item => item.Id == subscriptionId);
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.subscriptionAndDefinitions"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.recurringExpense", subscription.Name));
+        return true;
+    }
+
     public async Task RemoveHousingDefinitionAsync(Guid definitionId)
     {
         var definition = Data.HousingDefinitions.FirstOrDefault(item => item.Id == definitionId);
@@ -1863,6 +2052,21 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.deleted", "log.entity.housingDefinition", definition?.Description ?? definitionId.ToString()));
     }
 
+    public async Task<bool> ArchiveHousingDefinitionAsync(Guid definitionId)
+    {
+        var definition = Data.HousingDefinitions.FirstOrDefault(item => item.Id == definitionId);
+        if (definition is null)
+        {
+            return false;
+        }
+
+        Data.HousingDefinitions.RemoveAll(item => item.Id == definitionId);
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.housingTab"], _localizer["housing.recurringCostsTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.housingDefinition", definition.Description));
+        return true;
+    }
+
     public async Task RemoveTransportDefinitionAsync(Guid definitionId)
     {
         var definition = Data.TransportDefinitions.FirstOrDefault(item => item.Id == definitionId);
@@ -1871,6 +2075,21 @@ public sealed class ApplicationState
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.transport"], _localizer["transport.recurringCostsTab"]),
             BuildLogActivity("log.verb.deleted", "log.entity.transportDefinition", definition?.Subcategory ?? definitionId.ToString()));
+    }
+
+    public async Task<bool> ArchiveTransportDefinitionAsync(Guid definitionId)
+    {
+        var definition = Data.TransportDefinitions.FirstOrDefault(item => item.Id == definitionId);
+        if (definition is null)
+        {
+            return false;
+        }
+
+        Data.TransportDefinitions.RemoveAll(item => item.Id == definitionId);
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.recurringCostsTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.transportDefinition", string.IsNullOrWhiteSpace(definition.Description) ? definition.Subcategory : definition.Description));
+        return true;
     }
 
     public async Task RemoveHousingLoanAsync(Guid loanId)
@@ -2868,7 +3087,8 @@ public sealed class ApplicationState
         Guid? interestBindingPeriodId,
         Guid? amortizationPlanId,
         string? metadata,
-        Guid? transportVehicleId) => new()
+        Guid? transportVehicleId,
+        bool loanBalanceNeutral = false) => new()
         {
             Amount = amount,
             Year = month.Year,
@@ -2880,6 +3100,7 @@ public sealed class ApplicationState
             LoanId = loanId,
             LoanInterestBindingPeriodId = interestBindingPeriodId,
             LoanAmortizationPlanId = amortizationPlanId,
+            LoanBalanceNeutral = loanBalanceNeutral,
             TransportVehicleId = category == ExpenseCategory.Transport ? transportVehicleId : null
         };
 
@@ -2996,6 +3217,7 @@ public sealed class ApplicationState
     {
         Data.ExpenseRecords.RemoveAll(expense =>
             expense.LoanId.HasValue &&
+            !expense.LoanBalanceNeutral &&
             expense.Category == category &&
             expense.Year >= startDate.Year &&
             expense.Year <= endDate.Year &&
@@ -3020,6 +3242,7 @@ public sealed class ApplicationState
     {
         Data.ExpenseRecords.RemoveAll(expense =>
             expense.LoanId.HasValue &&
+            !expense.LoanBalanceNeutral &&
             expense.Category == category &&
             expense.Subcategory is InterestSubcategory or AmortizationSubcategory);
 
@@ -3915,7 +4138,25 @@ public sealed class ApplicationState
             .ThenBy(month => month.Month)
             .ToList();
 
-    private async Task AddSurplusDepositAsync(DateOnly month, decimal surplus, Guid? accountId, SavingsAccountType expectedAccountType)
+    private async Task<Guid> AddGeneratedOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null)
+    {
+        var entry = AddOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId);
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
+            BuildLogActivity("log.verb.added", "log.entity.expense", GetExpenseActivitySubject(subcategory, description)));
+
+        return entry.Id;
+    }
+
+    private ExpenseEntry AddOneTimeExpenseEntry(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null)
+    {
+        var entry = CreateOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId);
+        Data.ExpenseRecords.Add(entry);
+        return entry;
+    }
+
+    private async Task<Guid> AddSurplusDepositAsync(DateOnly month, decimal surplus, Guid? accountId, SavingsAccountType expectedAccountType)
     {
         if (!accountId.HasValue)
         {
@@ -3928,7 +4169,27 @@ public sealed class ApplicationState
             throw new InvalidOperationException("The selected savings account type is not valid for this action.");
         }
 
-        await AddSavingsDepositAsync(account.Id, month, surplus);
+        return await AddGeneratedSavingsDepositAsync(account.Id, month, surplus);
+    }
+
+    private async Task<Guid> AddGeneratedSavingsDepositAsync(Guid accountId, DateOnly date, decimal amount)
+    {
+        var account = GetSavingsAccount(accountId);
+        var entry = AddSavingsDepositExpenseEntry(account, date, amount);
+
+        await RecalculateSavingsAccountBalancesAsync(account.Id, NormalizeMonth(date));
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(account.AccountType)),
+            BuildLogActivity("log.verb.registered", "log.entity.deposit", account.AccountName));
+
+        return entry.Id;
+    }
+
+    private ExpenseEntry AddSavingsDepositExpenseEntry(SavingsAccount account, DateOnly date, decimal amount)
+    {
+        var entry = CreateSavingsDepositExpenseEntry(account, date, amount);
+        Data.ExpenseRecords.Add(entry);
+        return entry;
     }
 
     private async Task AddSavingsBalanceAdjustmentAsync(SavingsAccount account, DateOnly date, decimal amount)

@@ -25,14 +25,7 @@
                 </div>
                 <div>
                     <label class="form-label">@Localizer["table.period"]</label>
-                    <MudDatePicker Date="@model.CurrentPeriodDate"
-                                   DateChanged="HandleCurrentPeriodChanged"
-                                   Variant="Variant.Outlined"
-                                   PickerVariant="PickerVariant.Dialog"
-                                   OpenTo="OpenTo.Year"
-                                   DateFormat="yyyy-MM"
-                                   Margin="Margin.Dense"
-                                   Editable="false" />
+                    <InputDate class="form-control" @bind-Value="model.CurrentPeriodDate" />
                     <ValidationMessage For="() => model.CurrentPeriodDate" />
                 </div>
             </div>
@@ -49,14 +42,7 @@
                 <div class="form-grid mt-3">
                     <div>
                         <label class="form-label">@Localizer["savings.backfillFromPeriod"]</label>
-                        <MudDatePicker Date="@model.BackfillStartPeriodDate"
-                                       DateChanged="HandleBackfillStartPeriodChanged"
-                                       Variant="Variant.Outlined"
-                                       PickerVariant="PickerVariant.Dialog"
-                                       OpenTo="OpenTo.Year"
-                                       DateFormat="yyyy-MM"
-                                       Margin="Margin.Dense"
-                                       Editable="false" />
+                        <InputDate class="form-control" @bind-Value="model.BackfillStartPeriodDate" />
                         <ValidationMessage For="() => model.BackfillStartPeriodDate" />
                     </div>
                     <div>
@@ -76,11 +62,16 @@
 
 <style>
     .create-savings-account-dialog .mud-dialog {
-        max-width: 1100px;
-        width: min(1100px, calc(100vw - 32px));
+        max-width: 980px;
+        width: min(980px, calc(100vw - 32px));
+        min-height: min(860px, calc(100vh - 32px));
+        max-height: calc(100vh - 32px);
     }
-    .create-savings-account-dialog .mud-picker {
-        min-width: 320px;
+    .create-savings-account-dialog .mud-dialog-content {
+        overflow-y: auto;
+    }
+    .create-savings-account-dialog .form-control {
+        min-height: 46px;
     }
 </style>
 
@@ -122,14 +113,6 @@
 
     private void HandleSubmit() => MudDialog.Close(DialogResult.Ok(model));
 
-    private void HandleCurrentPeriodChanged(DateTime? value)
-    {
-        model.CurrentPeriodDate = value.HasValue
-            ? new DateTime(value.Value.Year, value.Value.Month, 1)
-            : null;
-        editContext.NotifyFieldChanged(FieldIdentifier.Create(() => model.CurrentPeriodDate));
-    }
-
     private void HandleBackfillChanged(ChangeEventArgs _)
     {
         if (model.BackfillDeposits)
@@ -145,14 +128,6 @@
         editContext.NotifyFieldChanged(FieldIdentifier.Create(() => model.BackfillDeposits));
         editContext.NotifyFieldChanged(FieldIdentifier.Create(() => model.BackfillStartPeriodDate));
         editContext.NotifyFieldChanged(FieldIdentifier.Create(() => model.BackfillStartBalance));
-    }
-
-    private void HandleBackfillStartPeriodChanged(DateTime? value)
-    {
-        model.BackfillStartPeriodDate = value.HasValue
-            ? new DateTime(value.Value.Year, value.Value.Month, 1)
-            : null;
-        editContext.NotifyFieldChanged(FieldIdentifier.Create(() => model.BackfillStartPeriodDate));
     }
 
     private void Cancel() => MudDialog.Cancel();
@@ -212,6 +187,11 @@
             if (BackfillStartBalance > CurrentBalance)
             {
                 yield return new ValidationResult("Start balance cannot exceed the current balance when backfilling deposits.", [nameof(BackfillStartBalance)]);
+            }
+
+            if (BackfillStartPeriod == CurrentPeriod && BackfillStartBalance != CurrentBalance)
+            {
+                yield return new ValidationResult("If the backfill start period is the same as the current period, the balances must match.", [nameof(BackfillStartPeriodDate), nameof(BackfillStartBalance)]);
             }
         }
     }

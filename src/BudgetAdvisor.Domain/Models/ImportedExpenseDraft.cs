@@ -6,6 +6,8 @@ public sealed class ImportedExpenseDraft
 {
     public DateOnly Date { get; set; }
 
+    public DateOnly? StartDate { get; set; }
+
     public DateOnly? EndDate { get; set; }
 
     public decimal Amount { get; set; }

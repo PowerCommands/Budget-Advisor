@@ -264,6 +264,19 @@ a, .btn-link {
     letter-spacing: 0.04em;
 }
 
+.table-summary-row td {
+    border-top: 2px solid color-mix(in srgb, var(--mud-palette-text-primary) 28%, var(--mud-palette-lines-default));
+    font-weight: 700;
+}
+
+.table-summary-label {
+    text-align: right;
+}
+
+.table-summary-value {
+    white-space: nowrap;
+}
+
 .compact-overview-table td {
     vertical-align: middle;
 }

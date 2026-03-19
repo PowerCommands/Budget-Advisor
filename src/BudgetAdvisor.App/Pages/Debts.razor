@@ -89,6 +89,7 @@
                     <table class="table app-table compact-overview-table">
                         <thead>
                             <tr>
+                                <th class="expander-column"></th>
                                 <th>@Localizer["field.name"]</th>
                                 <th>@Localizer["credits.provider"]</th>
                                 <th>@Localizer["credits.remainingDebt"]</th>
@@ -100,13 +101,18 @@
                             @foreach (var credit in Credits)
                             {
                                 <tr>
+                                    <td class="expander-column">
+                                        <MudIconButton Icon="@(IsCreditExpanded(credit.Id) ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                                                       Size="Size.Small"
+                                                       Color="Color.Primary"
+                                                       OnClick="@(() => ToggleCreditDetails(credit.Id))" />
+                                    </td>
                                     <td>@credit.Name</td>
                                     <td>@credit.Provider</td>
                                     <td>@AppState.FormatCurrency(AppState.GetCreditCurrentBalance(credit.Id))</td>
                                     <td>@AppState.FormatCurrency(GetAvailableCredit(credit))</td>
                                     <td>
                                         <div class="button-row">
-                                            <button class="btn btn-outline-primary btn-sm" type="button" @onclick="() => ToggleCreditDetails(credit.Id)">Details</button>
                                             <button class="btn btn-outline-primary btn-sm" @onclick="() => HandleRegisterPurchaseAsync(credit)">@Localizer["credits.registerPurchase"]</button>
                                             <button class="btn btn-outline-primary btn-sm" @onclick="() => HandlePostMonthAsync(credit)">@Localizer["credits.postMonth"]</button>
                                             <MudIconButton Icon="@Icons.Material.Filled.Delete"
@@ -119,7 +125,7 @@
                                 @if (IsCreditExpanded(credit.Id))
                                 {
                                     <tr class="row-detail">
-                                        <td colspan="5">
+                                        <td colspan="6">
                                             <div class="inline-detail-shell">
                                                 <section class="card-panel mt-4">
                                                     <h3>@Localizer["credits.purchaseTable"]</h3>
@@ -317,7 +323,8 @@
                 DateOnly.FromDateTime(model.Date.Value),
                 model.Amount,
                 model.Category,
-                model.Subcategory);
+                model.Subcategory,
+                model.Description);
             statusMessage = Localizer["credits.purchaseRegistered"];
         }
         catch (InvalidOperationException)

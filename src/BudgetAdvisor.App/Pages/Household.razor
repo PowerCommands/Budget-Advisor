@@ -1,5 +1,6 @@
 @page "/household"
 @using System.ComponentModel.DataAnnotations
+@using System.Globalization
 @implements IDisposable
 @inject ApplicationState AppState
 @inject IDialogService DialogService
@@ -35,7 +36,21 @@
                                 <td>@GetIncomeTypeDisplay(income)</td>
                                 <td>@income.Year</td>
                                 <td>@Localizer[$"month.{income.Month}"]</td>
-                                <td>@AppState.FormatCurrency(income.Amount)</td>
+                                <td class="income-amount-cell" @ondblclick="() => BeginEditIncomeAmount(income)">
+                                    @if (editingIncomeId == income.Id)
+                                    {
+                                        <input @ref="editingIncomeAmountInput"
+                                               class="form-control form-control-sm income-amount-input"
+                                               value="@editingIncomeAmountText"
+                                               @oninput="HandleIncomeAmountInput"
+                                               @onkeydown="HandleIncomeAmountKeyDownAsync"
+                                               @onblur="HandleIncomeAmountBlurAsync" />
+                                    }
+                                    else
+                                    {
+                                        <span>@AppState.FormatCurrency(income.Amount)</span>
+                                    }
+                                </td>
                                 <td>
                                     <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                                    Color="Color.Error"
@@ -227,6 +242,10 @@
     private EditContext oneTimeIncomeEditContext = default!;
     private EditContext salaryGenerationEditContext = default!;
     private bool showAllIncomes;
+    private Guid? editingIncomeId;
+    private string editingIncomeAmountText = string.Empty;
+    private ElementReference editingIncomeAmountInput;
+    private bool shouldFocusEditingIncomeAmount;
 
     private bool HasMembers => AppState.Data.Members.Count > 0;
 
@@ -248,6 +267,17 @@
         AppState.Changed += HandleChanged;
         Localizer.Changed += HandleChanged;
         ResetIncomeForms();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!shouldFocusEditingIncomeAmount)
+        {
+            return;
+        }
+
+        shouldFocusEditingIncomeAmount = false;
+        await editingIncomeAmountInput.FocusAsync();
     }
 
     private async Task HandleAddMemberAsync()
@@ -359,6 +389,78 @@
         await AppState.RemoveSalaryIncomePeriodAsync(salaryPeriod.Id);
     }
 
+    private void BeginEditIncomeAmount(IncomeEntry income)
+    {
+        editingIncomeId = income.Id;
+        editingIncomeAmountText = income.Amount.ToString("0.##", CultureInfo.CurrentCulture);
+        shouldFocusEditingIncomeAmount = true;
+    }
+
+    private async Task HandleIncomeAmountKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key is "Enter" or "NumpadEnter" or "Tab")
+        {
+            await SaveEditedIncomeAmountAsync();
+            return;
+        }
+
+        if (args.Key == "Escape")
+        {
+            CancelEditedIncomeAmount();
+        }
+    }
+
+    private async Task HandleIncomeAmountBlurAsync(FocusEventArgs _)
+    {
+        await SaveEditedIncomeAmountAsync();
+    }
+
+    private void HandleIncomeAmountInput(ChangeEventArgs args)
+    {
+        editingIncomeAmountText = args.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task SaveEditedIncomeAmountAsync()
+    {
+        if (!editingIncomeId.HasValue)
+        {
+            return;
+        }
+
+        var income = AppState.Data.IncomeRecords.FirstOrDefault(entry => entry.Id == editingIncomeId.Value);
+        if (income is null)
+        {
+            CancelEditedIncomeAmount();
+            return;
+        }
+
+        if (!TryParseIncomeAmount(editingIncomeAmountText, out var amount) || amount <= 0m)
+        {
+            CancelEditedIncomeAmount();
+            return;
+        }
+
+        await AppState.UpdateIncomeAmountAsync(income.Id, amount);
+        CancelEditedIncomeAmount();
+    }
+
+    private void CancelEditedIncomeAmount()
+    {
+        editingIncomeId = null;
+        editingIncomeAmountText = string.Empty;
+        shouldFocusEditingIncomeAmount = false;
+    }
+
+    private static bool TryParseIncomeAmount(string value, out decimal amount)
+    {
+        if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.CurrentCulture, out amount))
+        {
+            return true;
+        }
+
+        return decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out amount);
+    }
+
     private void ResetIncomeForms()
     {
         var today = DateTime.Today;
@@ -460,3 +562,14 @@
         }
     }
 }
+
+<style>
+    .income-amount-cell {
+        min-width: 140px;
+        cursor: text;
+    }
+
+    .income-amount-input {
+        min-width: 120px;
+    }
+</style>
