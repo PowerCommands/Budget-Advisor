@@ -1,0 +1,174 @@
+@using System.ComponentModel.DataAnnotations
+@inject LocalizationService Localizer
+
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.h6">@Localizer["closeMonth.title"]</MudText>
+
+        <div class="mt-3">
+            <p class="mb-2"><strong>@Localizer["closeMonth.month"]:</strong> @GetMonthLabel(Context.Month)</p>
+            <p class="mb-0"><strong>@Localizer["closeMonth.surplus"]:</strong> @FormatCurrency(Context.Surplus)</p>
+        </div>
+
+        @if (Context.IsClosed)
+        {
+            <p class="empty-state mt-3 mb-0">@Localizer["closeMonth.alreadyClosed"]</p>
+        }
+        else
+        {
+            <EditForm EditContext="editContext" OnValidSubmit="HandleSubmit">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="mt-3">
+                    <label class="form-label">@Localizer["closeMonth.surplusHandling"]</label>
+                    <InputRadioGroup @bind-Value="SelectedAction" Name="close-month-action">
+                        <div class="d-flex flex-column gap-2">
+                            <label class="form-check">
+                                <InputRadio class="form-check-input"
+                                            Value="CloseMonthSurplusAction.DoNothing"
+                                            disabled="@IsActionDisabled(CloseMonthSurplusAction.DoNothing)" />
+                                <span class="form-check-label">@Localizer["closeMonth.option.doNothing"]</span>
+                            </label>
+                            <label class="form-check">
+                                <InputRadio class="form-check-input"
+                                            Value="CloseMonthSurplusAction.RegisterExpense"
+                                            disabled="@IsActionDisabled(CloseMonthSurplusAction.RegisterExpense)" />
+                                <span class="form-check-label">@Localizer["closeMonth.option.registerExpense"]</span>
+                            </label>
+                            <label class="form-check">
+                                <InputRadio class="form-check-input"
+                                            Value="CloseMonthSurplusAction.DepositToBankSavings"
+                                            disabled="@IsActionDisabled(CloseMonthSurplusAction.DepositToBankSavings)" />
+                                <span class="form-check-label">@Localizer["closeMonth.option.depositBank"]</span>
+                            </label>
+                            <label class="form-check">
+                                <InputRadio class="form-check-input"
+                                            Value="CloseMonthSurplusAction.DepositToFundSavings"
+                                            disabled="@IsActionDisabled(CloseMonthSurplusAction.DepositToFundSavings)" />
+                                <span class="form-check-label">@Localizer["closeMonth.option.depositFund"]</span>
+                            </label>
+                        </div>
+                    </InputRadioGroup>
+                    <ValidationMessage For="() => model.Action" />
+                </div>
+
+                @if (RequiresAccountSelection())
+                {
+                    <div class="mt-3">
+                        <label class="form-label">@Localizer["closeMonth.account"]</label>
+                        <InputSelect class="form-select" @bind-Value="model.SavingsAccountId">
+                            <option value="">@Localizer["closeMonth.selectAccount"]</option>
+                            @foreach (var account in GetSelectableAccounts())
+                            {
+                                <option value="@account.Id">@account.AccountName</option>
+                            }
+                        </InputSelect>
+                        <ValidationMessage For="() => model.SavingsAccountId" />
+                    </div>
+                }
+            </EditForm>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="Cancel">@Localizer["action.cancel"]</MudButton>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   OnClick="Submit"
+                   Disabled="@Context.IsClosed">@Localizer["action.markClosed"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public CloseMonthContext Context { get; set; } = new();
+
+    [Parameter]
+    public Func<decimal, string>? CurrencyFormatter { get; set; }
+
+    private CloseMonthDialogModel model = new();
+    private EditContext editContext = default!;
+
+    private CloseMonthSurplusAction SelectedAction
+    {
+        get => model.Action;
+        set
+        {
+            model.Action = value;
+            model.SavingsAccountId = GetDefaultAccountIdForAction(value);
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        model.Action = CloseMonthSurplusAction.DoNothing;
+        model.SavingsAccountId = null;
+        editContext = new EditContext(model);
+    }
+
+    private bool HasSurplus() => Context.Surplus > 0m;
+
+    private bool IsActionDisabled(CloseMonthSurplusAction action) => action switch
+    {
+        CloseMonthSurplusAction.DoNothing => false,
+        CloseMonthSurplusAction.RegisterExpense => !HasSurplus(),
+        CloseMonthSurplusAction.DepositToBankSavings => !HasSurplus() || Context.BankAccounts.Count == 0,
+        CloseMonthSurplusAction.DepositToFundSavings => !HasSurplus() || Context.FundAccounts.Count == 0,
+        _ => true
+    };
+
+    private bool RequiresAccountSelection() =>
+        SelectedAction is CloseMonthSurplusAction.DepositToBankSavings or CloseMonthSurplusAction.DepositToFundSavings &&
+        !IsActionDisabled(SelectedAction);
+
+    private IReadOnlyList<SavingsAccount> GetSelectableAccounts() => SelectedAction switch
+    {
+        CloseMonthSurplusAction.DepositToBankSavings => Context.BankAccounts,
+        CloseMonthSurplusAction.DepositToFundSavings => Context.FundAccounts,
+        _ => []
+    };
+
+    private Guid? GetDefaultAccountIdForAction(CloseMonthSurplusAction action) => action switch
+    {
+        CloseMonthSurplusAction.DepositToBankSavings when Context.BankAccounts.Count > 0 => Context.BankAccounts[0].Id,
+        CloseMonthSurplusAction.DepositToFundSavings when Context.FundAccounts.Count > 0 => Context.FundAccounts[0].Id,
+        _ => null
+    };
+
+    private string GetMonthLabel(DateOnly month) => $"{Localizer[$"month.{month.Month}"]} {month.Year}";
+
+    private string FormatCurrency(decimal amount) => CurrencyFormatter?.Invoke(amount) ?? amount.ToString("0.00");
+
+    private void Submit()
+    {
+        if (!editContext.Validate())
+        {
+            return;
+        }
+
+        HandleSubmit();
+    }
+
+    private void HandleSubmit() => MudDialog.Close(DialogResult.Ok(model));
+
+    private void Cancel() => MudDialog.Cancel();
+
+    public sealed class CloseMonthDialogModel : IValidatableObject
+    {
+        public CloseMonthSurplusAction Action { get; set; } = CloseMonthSurplusAction.DoNothing;
+
+        public Guid? SavingsAccountId { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (Action is CloseMonthSurplusAction.DepositToBankSavings or CloseMonthSurplusAction.DepositToFundSavings &&
+                !SavingsAccountId.HasValue)
+            {
+                yield return new ValidationResult("A savings account must be selected.", [nameof(SavingsAccountId)]);
+            }
+        }
+    }
+}

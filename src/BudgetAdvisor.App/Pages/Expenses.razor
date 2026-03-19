@@ -15,17 +15,6 @@
 }
 
 <MudTabs Rounded="true" Elevation="0" PanelClass="pt-4">
-    <MudTabPanel Text="@Localizer["expenses.expensesTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
-        <ExpenseRecordsTable Scope="ExpenseQueryScope.ExpensesOnly"
-                             TitleKey="expenses.expensesTitle"
-                             ShowTitle="false"
-                             DefaultToCurrentMonth="true"
-                             ShowAllCostsToggle="true"
-                             IncludeAllCosts="@showAllCosts"
-                             IncludeAllCostsChanged="HandleShowAllCostsChanged"
-                             OnDelete="HandleDeleteExpenseAsync" />
-    </MudTabPanel>
-
     <MudTabPanel Text="@Localizer["expenses.oneTimeExpense"]" Icon="@Icons.Material.Filled.AddCard">
         <section class="card-panel">
             <EditForm EditContext="oneTimeExpenseEditContext" OnValidSubmit="HandleAddExpenseAsync">
@@ -252,6 +241,17 @@
                 </div>
             </div>
         </section>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["expenses.expensesTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
+        <ExpenseRecordsTable Scope="ExpenseQueryScope.ExpensesOnly"
+                             TitleKey="expenses.expensesTitle"
+                             ShowTitle="false"
+                             DefaultToCurrentMonth="true"
+                             ShowAllCostsToggle="true"
+                             IncludeAllCosts="@showAllCosts"
+                             IncludeAllCostsChanged="HandleShowAllCostsChanged"
+                             OnDelete="HandleDeleteExpenseAsync" />
     </MudTabPanel>
 </MudTabs>
 

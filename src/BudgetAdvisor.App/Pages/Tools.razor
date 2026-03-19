@@ -185,6 +185,77 @@
                     </MudPaper>
                 </MudItem>
 
+                <MudItem xs="12">
+                    <MudPaper Class="card-panel" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.subcategories"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.subcategoriesHelp"]</MudText>
+                            </div>
+
+                            <div class="form-grid">
+                                <div>
+                                    <label class="form-label">@Localizer["settings.subcategoryMainCategory"]</label>
+                                    <MudSelect T="SubcategoryMainCategory"
+                                               Value="@selectedSubcategoryMainCategory"
+                                               ValueChanged="HandleSubcategoryMainCategoryChangedAsync"
+                                               Variant="Variant.Outlined">
+                                        @foreach (var category in EditableSubcategoryMainCategories)
+                                        {
+                                            <MudSelectItem T="SubcategoryMainCategory" Value="@category">@GetSubcategoryMainCategoryDisplay(category)</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </div>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table app-table">
+                                    <thead>
+                                        <tr>
+                                            <th>@Localizer["language.sv"]</th>
+                                            <th>@Localizer["language.en"]</th>
+                                            <th>@Localizer["field.actions"]</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (editableSubcategoryDefinitions.Count == 0)
+                                        {
+                                            <tr>
+                                                <td colspan="3" class="empty-state">@Localizer["settings.noSubcategories"]</td>
+                                            </tr>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var definition in editableSubcategoryDefinitions)
+                                            {
+                                                <tr>
+                                                    <td>
+                                                        <InputText class="form-control" @bind-Value="definition.SwedishName" />
+                                                    </td>
+                                                    <td>
+                                                        <InputText class="form-control" @bind-Value="definition.EnglishName" />
+                                                    </td>
+                                                    <td>
+                                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                                       Color="Color.Error"
+                                                                       Size="Size.Small"
+                                                                       OnClick="@(() => RemoveSubcategoryDefinition(definition))" />
+                                                    </td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="button-row">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="AddSubcategoryDefinition">@Localizer["settings.addSubcategory"]</MudButton>
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleSaveSubcategoryDefinitionsAsync">@Localizer["action.save"]</MudButton>
+                            </div>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
             </MudGrid>
         </MudTabPanel>
 
@@ -275,15 +346,19 @@
     private const string SpaceThousandsSeparator = " ";
     private const string NoThousandsSeparator = "";
     private static readonly string[] CurrencyCodes = ["SEK", "USD", "EUR", "GBP"];
+    private static readonly IReadOnlyList<SubcategoryMainCategory> EditableSubcategoryMainCategories = Enum.GetValues<SubcategoryMainCategory>();
     private BrowserStorageUsageSnapshot StorageUsage { get; set; } = new();
     private DateTime? pruningCutoffDate;
     private string? statusMessage;
+    private SubcategoryMainCategory selectedSubcategoryMainCategory = SubcategoryMainCategory.Income;
+    private List<SubcategoryDefinition> editableSubcategoryDefinitions = [];
 
     protected override async Task OnInitializedAsync()
     {
         Localizer.Changed += HandleChanged;
         AppState.Changed += HandleChanged;
         ApplicationLogService.Changed += HandleChanged;
+        LoadEditableSubcategoryDefinitions();
         await RefreshStorageUsageAsync();
     }
 
@@ -360,6 +435,38 @@
     {
         await AppState.SetRegionalSettingsAsync(AppState.Data.DecimalSeparator, thousandsSeparator);
         statusMessage = Localizer["settings.regionalUpdated"];
+    }
+
+    private Task HandleSubcategoryMainCategoryChangedAsync(SubcategoryMainCategory category)
+    {
+        selectedSubcategoryMainCategory = category;
+        LoadEditableSubcategoryDefinitions();
+        return Task.CompletedTask;
+    }
+
+    private void LoadEditableSubcategoryDefinitions()
+    {
+        editableSubcategoryDefinitions = AppState.GetSubcategoryDefinitions(selectedSubcategoryMainCategory).ToList();
+    }
+
+    private void AddSubcategoryDefinition()
+    {
+        editableSubcategoryDefinitions.Add(new SubcategoryDefinition
+        {
+            MainCategory = selectedSubcategoryMainCategory
+        });
+    }
+
+    private void RemoveSubcategoryDefinition(SubcategoryDefinition definition)
+    {
+        editableSubcategoryDefinitions.Remove(definition);
+    }
+
+    private async Task HandleSaveSubcategoryDefinitionsAsync()
+    {
+        await AppState.SaveSubcategoryDefinitionsAsync(selectedSubcategoryMainCategory, editableSubcategoryDefinitions);
+        LoadEditableSubcategoryDefinitions();
+        statusMessage = Localizer["settings.subcategoriesUpdated"];
     }
 
     private async Task HandleThemeModeChangedAsync(string themeMode)
@@ -441,6 +548,17 @@
             summary.SalarySeriesRemoved,
             summary.RecurringExpenseDefinitionsRemoved);
     }
+
+    private string GetSubcategoryMainCategoryDisplay(SubcategoryMainCategory category) => category switch
+    {
+        SubcategoryMainCategory.Income => Localizer["subcategoryMainCategory.Income"],
+        SubcategoryMainCategory.Food => Localizer["expenseCategory.Food"],
+        SubcategoryMainCategory.Housing => Localizer["expenseCategory.Housing"],
+        SubcategoryMainCategory.Transport => Localizer["expenseCategory.Transport"],
+        SubcategoryMainCategory.Clothing => Localizer["expenseCategory.Clothing"],
+        SubcategoryMainCategory.Other => Localizer["expenseCategory.Other"],
+        _ => category.ToString()
+    };
 
     private static async Task<string> ReadFileAsync(IBrowserFile file)
     {

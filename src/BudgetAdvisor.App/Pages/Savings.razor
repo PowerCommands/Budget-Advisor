@@ -10,6 +10,18 @@
 }
 
 <MudTabs Class="section-tabs" Rounded="true" SliderColor="Color.Primary" Elevation="0">
+    <MudTabPanel Text="@Localizer["savings.bankTab"]" Icon="@Icons.Material.Filled.AccountBalance">
+        @RenderSavingsAccountTab(SavingsAccountType.Bank)
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["savings.fundsTab"]" Icon="@Icons.Material.Filled.ShowChart">
+        @RenderSavingsAccountTab(SavingsAccountType.Fund)
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["savings.stocksTab"]" Icon="@Icons.Material.Filled.CandlestickChart">
+        @RenderSavingsAccountTab(SavingsAccountType.Stock)
+    </MudTabPanel>
+
     <MudTabPanel Text="@Localizer["savings.transactionsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
         <section class="card-panel">
             <div class="section-title-row">
@@ -90,18 +102,6 @@
                 </table>
             </div>
         </section>
-    </MudTabPanel>
-
-    <MudTabPanel Text="@Localizer["savings.bankTab"]" Icon="@Icons.Material.Filled.AccountBalance">
-        @RenderSavingsAccountTab(SavingsAccountType.Bank)
-    </MudTabPanel>
-
-    <MudTabPanel Text="@Localizer["savings.fundsTab"]" Icon="@Icons.Material.Filled.ShowChart">
-        @RenderSavingsAccountTab(SavingsAccountType.Fund)
-    </MudTabPanel>
-
-    <MudTabPanel Text="@Localizer["savings.stocksTab"]" Icon="@Icons.Material.Filled.CandlestickChart">
-        @RenderSavingsAccountTab(SavingsAccountType.Stock)
     </MudTabPanel>
 </MudTabs>
 
@@ -416,7 +416,13 @@
             { dialog => dialog.AccountType, accountType }
         };
 
-        var dialog = await DialogService.ShowAsync<CreateSavingsAccountDialog>(Localizer[GetCreateAccountTitleKey(accountType)], parameters);
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.ExtraLarge,
+            FullWidth = true
+        };
+
+        var dialog = await DialogService.ShowAsync<CreateSavingsAccountDialog>(Localizer[GetCreateAccountTitleKey(accountType)], parameters, options);
         if (dialog is null)
         {
             return;
@@ -428,7 +434,7 @@
             return;
         }
 
-        if (result.Data is not CreateSavingsAccountDialog.CreateSavingsAccountDialogModel model || !model.StartDate.HasValue)
+        if (result.Data is not CreateSavingsAccountDialog.CreateSavingsAccountDialogModel model)
         {
             return;
         }
@@ -437,8 +443,11 @@
             accountType,
             model.ProviderName,
             model.AccountName,
-            model.OpeningBalance,
-            DateOnly.FromDateTime(model.StartDate.Value));
+            model.CurrentBalance,
+            model.CurrentPeriod,
+            model.BackfillDeposits,
+            model.BackfillDeposits ? model.BackfillStartPeriod : null,
+            model.BackfillDeposits ? model.BackfillStartBalance : null);
         statusMessage = Localizer["savings.accountCreated"];
     }
 
@@ -504,8 +513,8 @@
             return;
         }
 
-        await AppState.AddSavingsDepositAsync(account.Id, DateOnly.FromDateTime(model.Date.Value), model.Amount);
-        statusMessage = Localizer["savings.depositRegistered"];
+        await AppState.AddSavingsDepositAsync(account.Id, DateOnly.FromDateTime(model.Date.Value), model.Amount, model.IsAdjustment);
+        statusMessage = Localizer[model.IsAdjustment ? "savings.balanceAdjusted" : "savings.depositRegistered"];
     }
 
     private async Task HandleWithdrawalAsync(SavingsAccount account)
@@ -529,8 +538,8 @@
 
         try
         {
-            await AppState.AddSavingsWithdrawalAsync(account.Id, DateOnly.FromDateTime(model.Date.Value), model.Amount);
-            statusMessage = Localizer["savings.withdrawalRegistered"];
+            await AppState.AddSavingsWithdrawalAsync(account.Id, DateOnly.FromDateTime(model.Date.Value), model.Amount, model.IsAdjustment);
+            statusMessage = Localizer[model.IsAdjustment ? "savings.balanceAdjusted" : "savings.withdrawalRegistered"];
         }
         catch (InvalidOperationException)
         {

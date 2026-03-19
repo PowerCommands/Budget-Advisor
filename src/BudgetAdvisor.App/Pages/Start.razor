@@ -1,25 +1,32 @@
 @page "/"
 @implements IDisposable
 @inject ApplicationState AppState
+@inject IDialogService DialogService
 @inject LocalizationService Localizer
+
+@if (!string.IsNullOrWhiteSpace(statusMessage))
+{
+    <div class="status-banner">@statusMessage</div>
+}
 
 <section class="card-panel">
     <div class="section-title-row">
         <h2>@Localizer["start.latestMonth"]</h2>
-        <span class="section-note">@GetMonthLabel(overview.Year, overview.Month)</span>
+        <span class="section-note">@GetBudgetNote()</span>
     </div>
 
     <div class="stats-grid">
-        <div class="stat-card stat-card-income"><span>@Localizer["reporting.income"]</span><strong>@AppState.FormatCurrency(overview.Income)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.housing"]</span><strong>@AppState.FormatCurrency(overview.Housing)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.food"]</span><strong>@AppState.FormatCurrency(overview.Food)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.transport"]</span><strong>@AppState.FormatCurrency(overview.Transport)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.clothing"]</span><strong>@AppState.FormatCurrency(overview.Clothing)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.savings"]</span><strong>@AppState.FormatCurrency(overview.Savings)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.other"]</span><strong>@AppState.FormatCurrency(overview.Other)</strong></div>
+        <div class="stat-card stat-card-income"><span>@Localizer["reporting.income"]</span><strong>@AppState.FormatCurrency(budgetOverview.Income)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.housing"]</span><strong>@AppState.FormatCurrency(budgetOverview.Housing)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.food"]</span><strong>@AppState.FormatCurrency(budgetOverview.Food)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.transport"]</span><strong>@AppState.FormatCurrency(budgetOverview.Transport)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.clothing"]</span><strong>@AppState.FormatCurrency(budgetOverview.Clothing)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.savings"]</span><strong>@AppState.FormatCurrency(budgetOverview.Savings)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.other"]</span><strong>@AppState.FormatCurrency(budgetOverview.Other)</strong></div>
+        <div class="stat-card"><span>@Localizer["reporting.credits"]</span><strong>@AppState.FormatCurrency(budgetOverview.Credits)</strong></div>
         <div class="@GetBalanceCardClass()">
             <span>@Localizer["table.balance"]</span>
-            <strong>@AppState.FormatCurrency(overview.NetChange)</strong>
+            <strong>@AppState.FormatCurrency(budgetOverview.NetChange)</strong>
         </div>
     </div>
 </section>
@@ -72,6 +79,7 @@
                     <th>@Localizer["table.interest"]</th>
                     <th>@Localizer["table.amortization"]</th>
                     <th>@Localizer["table.balance"]</th>
+                    <th>@Localizer["field.actions"]</th>
                 </tr>
             </thead>
             <tbody>
@@ -87,6 +95,11 @@
                         <td>@AppState.FormatCurrency(row.Interest)</td>
                         <td>@AppState.FormatCurrency(row.Amortization)</td>
                         <td class="@GetReportBalanceCellClass(row)">@AppState.FormatCurrency(row.Balance)</td>
+                        <td>
+                            <button class="btn btn-outline-primary btn-sm"
+                                    @onclick="() => HandleCloseMonthAsync(new DateOnly(row.Year, row.Month, 1))"
+                                    disabled="@row.IsClosed">@Localizer["action.markClosed"]</button>
+                        </td>
                     </tr>
                 }
             </tbody>
@@ -95,11 +108,12 @@
 </section>
 
 @code {
-    private MonthlyOverview overview = new();
+    private BudgetOverview budgetOverview = new();
     private DashboardKeyMetrics keyMetrics = new();
     private IReadOnlyList<MonthlyReportRow> reportRows = [];
     private DateTime? reportStartDate;
     private DateTime? reportEndDate;
+    private string? statusMessage;
 
     protected override void OnInitialized()
     {
@@ -110,7 +124,7 @@
 
     private void LoadData()
     {
-        overview = AppState.GetMonthlyOverview(DateTime.Today.Year, DateTime.Today.Month);
+        budgetOverview = AppState.GetBudgetOverview();
         keyMetrics = AppState.GetCurrentDashboardKeyMetrics();
 
         if (!reportStartDate.HasValue && !reportEndDate.HasValue)
@@ -148,8 +162,42 @@
         return InvokeAsync(StateHasChanged);
     }
 
+    private async Task HandleCloseMonthAsync(DateOnly month)
+    {
+        statusMessage = null;
+
+        var context = AppState.GetCloseMonthContext(month);
+        var parameters = new DialogParameters<CloseMonthDialog>
+        {
+            { dialog => dialog.Context, context },
+            { dialog => dialog.CurrencyFormatter, AppState.FormatCurrency }
+        };
+
+        var dialog = await DialogService.ShowAsync<CloseMonthDialog>(Localizer["closeMonth.title"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result.Data is not CloseMonthDialog.CloseMonthDialogModel model)
+        {
+            return;
+        }
+
+        var wasClosed = await AppState.CloseMonthAsync(month, model.Action, model.SavingsAccountId);
+        statusMessage = wasClosed
+            ? Localizer["closeMonth.closed"]
+            : Localizer["closeMonth.alreadyClosed"];
+    }
+
     private string GetBalanceCardClass()
-        => $"stat-card stat-card-balance-{GetBalanceVariant(overview.Income, overview.NetChange)}";
+        => $"stat-card stat-card-balance-{GetBalanceVariant(budgetOverview.Income, budgetOverview.NetChange)}";
 
     private string GetReportBalanceCellClass(MonthlyReportRow row)
         => $"report-balance-cell report-balance-{GetBalanceVariant(row.Income, row.Balance)}";
@@ -176,6 +224,25 @@
     }
 
     private static string FormatPercentage(decimal value) => $"{value:P1}";
+
+    private string GetBudgetNote()
+    {
+        if (budgetOverview.ClosedMonthCount == 0 ||
+            !budgetOverview.StartYear.HasValue ||
+            !budgetOverview.StartMonth.HasValue ||
+            !budgetOverview.EndYear.HasValue ||
+            !budgetOverview.EndMonth.HasValue)
+        {
+            return Localizer["closeMonth.noClosedMonths"];
+        }
+
+        if (budgetOverview.ClosedMonthCount == 1)
+        {
+            return GetMonthLabel(budgetOverview.EndYear.Value, budgetOverview.EndMonth.Value);
+        }
+
+        return $"{GetMonthLabel(budgetOverview.StartYear.Value, budgetOverview.StartMonth.Value)} - {GetMonthLabel(budgetOverview.EndYear.Value, budgetOverview.EndMonth.Value)}";
+    }
 
     public void Dispose()
     {

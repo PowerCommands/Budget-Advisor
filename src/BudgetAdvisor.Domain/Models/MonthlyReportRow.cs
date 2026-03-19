@@ -4,6 +4,10 @@ public sealed class MonthlyReportRow
 {
     public string Period { get; set; } = string.Empty;
 
+    public int Year { get; set; }
+
+    public int Month { get; set; }
+
     public decimal Income { get; set; }
 
     public decimal Expenses { get; set; }
@@ -19,4 +23,6 @@ public sealed class MonthlyReportRow
     public decimal Amortization { get; set; }
 
     public decimal Balance { get; set; }
+
+    public bool IsClosed { get; set; }
 }

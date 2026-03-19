@@ -8,6 +8,8 @@ public sealed class DataPruningSummary
 
     public int MonthlyBalancesRemoved { get; set; }
 
+    public int ClosedMonthsRemoved { get; set; }
+
     public int LoanBindingPeriodsRemoved { get; set; }
 
     public int LoanAmortizationPlansRemoved { get; set; }
@@ -24,12 +26,15 @@ public sealed class DataPruningSummary
 
     public int SavingsReturnPeriodsRemoved { get; set; }
 
+    public int SavingsBalanceAdjustmentsRemoved { get; set; }
+
     public int SavingsGeneratedReturnsRemoved { get; set; }
 
     public int TotalRemoved =>
         IncomeEntriesRemoved +
         ExpenseEntriesRemoved +
         MonthlyBalancesRemoved +
+        ClosedMonthsRemoved +
         LoanBindingPeriodsRemoved +
         LoanAmortizationPlansRemoved +
         SalarySeriesRemoved +
@@ -38,5 +43,6 @@ public sealed class DataPruningSummary
         TransportDefinitionsRemoved +
         TransportLeasingContractsRemoved +
         SavingsReturnPeriodsRemoved +
+        SavingsBalanceAdjustmentsRemoved +
         SavingsGeneratedReturnsRemoved;
 }

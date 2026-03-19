@@ -11,16 +11,6 @@
 }
 
 <MudTabs Class="section-tabs" Rounded="true" SliderColor="Color.Primary" Elevation="0">
-    <MudTabPanel Text="@Localizer["transport.costsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
-        <ExpenseRecordsTable Scope="ExpenseQueryScope.Transport"
-                             ShowTitle="false"
-                             DefaultToCurrentMonth="true"
-                             ShowAllCostsToggle="true"
-                             IncludeAllCosts="@showAllTransportCosts"
-                             IncludeAllCostsChanged="HandleShowAllTransportCostsChanged"
-                             OnDelete="HandleDeleteExpenseAsync" />
-    </MudTabPanel>
-
     <MudTabPanel Text="@Localizer["transport.oneTimeCost"]" Icon="@Icons.Material.Filled.AddCard">
         <section class="card-panel">
             <h2>@Localizer["transport.oneTimeCost"]</h2>
@@ -561,6 +551,16 @@
                 </table>
             </div>
         </section>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["transport.costsTab"]" Icon="@Icons.Material.Filled.ReceiptLong">
+        <ExpenseRecordsTable Scope="ExpenseQueryScope.Transport"
+                             ShowTitle="false"
+                             DefaultToCurrentMonth="true"
+                             ShowAllCostsToggle="true"
+                             IncludeAllCosts="@showAllTransportCosts"
+                             IncludeAllCostsChanged="HandleShowAllTransportCostsChanged"
+                             OnDelete="HandleDeleteExpenseAsync" />
     </MudTabPanel>
 
 </MudTabs>

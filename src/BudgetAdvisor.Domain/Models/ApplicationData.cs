@@ -19,6 +19,10 @@ public sealed class ApplicationData
 
     public List<SalaryIncomePeriod> SalaryIncomePeriods { get; set; } = [];
 
+    public List<SubcategoryDefinition> SubcategoryDefinitions { get; set; } = [];
+
+    public bool HasInitializedSubcategoryDefinitions { get; set; }
+
     public List<ExpenseEntry> ExpenseRecords { get; set; } = [];
 
     public List<SubscriptionExpenseDefinition> Subscriptions { get; set; } = [];
@@ -41,6 +45,8 @@ public sealed class ApplicationData
 
     public List<MonthlyBalance> MonthlyBalances { get; set; } = [];
 
+    public List<ClosedMonth> ClosedMonths { get; set; } = [];
+
     public List<TransportLeasingContract> TransportLeasingContracts { get; set; } = [];
 
     public List<Credit> Credits { get; set; } = [];
@@ -50,6 +56,8 @@ public sealed class ApplicationData
     public List<SavingsAccount> SavingsAccounts { get; set; } = [];
 
     public List<SavingsReturnPeriod> SavingsReturnPeriods { get; set; } = [];
+
+    public List<SavingsBalanceAdjustment> SavingsBalanceAdjustments { get; set; } = [];
 
     public List<SavingsGeneratedReturn> SavingsGeneratedReturns { get; set; } = [];
 

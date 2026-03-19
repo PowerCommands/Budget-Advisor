@@ -390,19 +390,7 @@
     private string FormatYearMonth(int year, int month) => $"{year}-{month:00}";
 
     private IReadOnlyList<string> GetIncomeTypeSuggestions() =>
-        AppState.Data.IncomeRecords
-            .Select(record => AppState.GetIncomeTypeDisplay(record.Type))
-            .Concat([
-                Localizer["incomeType.Salary"],
-                Localizer["incomeType.TaxRefund"],
-                Localizer["incomeType.Inheritance"],
-                Localizer["incomeType.Gift"],
-                Localizer["incomeType.Other"]
-            ])
-            .Where(type => !string.IsNullOrWhiteSpace(type))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(type => type)
-            .ToList();
+        AppState.GetIncomeTypeSuggestions();
 
     private void HandleChanged() => InvokeAsync(StateHasChanged);
 

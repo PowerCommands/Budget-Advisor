@@ -9,4 +9,6 @@ public sealed class SavingsAmountDialogModel
 
     [Range(typeof(decimal), "0.01", "999999999", ErrorMessage = "Amount must be greater than zero.")]
     public decimal Amount { get; set; }
+
+    public bool IsAdjustment { get; set; }
 }

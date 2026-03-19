@@ -21,6 +21,11 @@
                     <ValidationMessage For="() => model.Amount" />
                 </div>
             </div>
+
+            <div class="form-check mt-3">
+                <InputCheckbox class="form-check-input" @bind-Value="model.IsAdjustment" />
+                <label class="form-check-label">@Localizer["savings.adjustment"]</label>
+            </div>
         </EditForm>
     </DialogContent>
     <DialogActions>

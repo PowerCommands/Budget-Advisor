@@ -19,6 +19,9 @@ public sealed class DataPruningService : IDataPruningService
         summary.MonthlyBalancesRemoved = data.MonthlyBalances.RemoveAll(balance =>
             new DateOnly(balance.Year, balance.Month, 1) < cutoffDate);
 
+        summary.ClosedMonthsRemoved = data.ClosedMonths.RemoveAll(month =>
+            new DateOnly(month.Year, month.Month, 1) < cutoffDate);
+
         summary.LoanBindingPeriodsRemoved = data.LoanInterestBindingPeriods.RemoveAll(period =>
             NormalizeMonth(period.EndMonth) < cutoffDate);
 
@@ -56,6 +59,9 @@ public sealed class DataPruningService : IDataPruningService
 
         summary.SavingsReturnPeriodsRemoved = data.SavingsReturnPeriods.RemoveAll(period =>
             NormalizeMonth(period.EndDate) < cutoffDate);
+
+        summary.SavingsBalanceAdjustmentsRemoved = data.SavingsBalanceAdjustments.RemoveAll(item =>
+            new DateOnly(item.Year, item.Month, 1) < cutoffDate);
 
         summary.SavingsGeneratedReturnsRemoved = data.SavingsGeneratedReturns.RemoveAll(item =>
             new DateOnly(item.Year, item.Month, 1) < cutoffDate);

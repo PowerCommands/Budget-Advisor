@@ -19,6 +19,7 @@ public sealed class ApplicationState
     private const string AmortizationSubcategory = "Amortization";
     private const string LeasingSubcategory = "Leasing";
     private const string AssetSaleSubcategory = "Asset Sale";
+    private const string UnspecifiedSubcategory = "Unspecified";
     private const string CreditMetadata = "Credit";
     private const string VehicleAssetType = "Vehicle";
     private const string HousingAssetType = "Housing";
@@ -507,20 +508,81 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.added", "log.entity.vehicle", vehicle.Name));
     }
 
-    public async Task AddSavingsAccountAsync(SavingsAccountType accountType, string providerName, string accountName, decimal openingBalance, DateOnly startDate)
+    public async Task AddSavingsAccountAsync(
+        SavingsAccountType accountType,
+        string providerName,
+        string accountName,
+        decimal currentBalance,
+        DateOnly currentPeriod,
+        bool backfillDeposits = false,
+        DateOnly? backfillStartPeriod = null,
+        decimal? backfillStartBalance = null)
     {
+        var normalizedCurrentPeriod = NormalizeMonth(currentPeriod);
+        var normalizedCreatedMonth = backfillDeposits
+            ? NormalizeMonth(backfillStartPeriod ?? currentPeriod)
+            : normalizedCurrentPeriod;
+        var normalizedBackfillStartBalance = backfillDeposits
+            ? Math.Max(0m, backfillStartBalance ?? 0m)
+            : currentBalance;
+
+        if (normalizedCreatedMonth > normalizedCurrentPeriod)
+        {
+            throw new InvalidOperationException("Backfill start period cannot be later than the current period.");
+        }
+
+        if (backfillDeposits && normalizedBackfillStartBalance > currentBalance)
+        {
+            throw new InvalidOperationException("Backfill start balance cannot exceed the current balance.");
+        }
+
         var account = new SavingsAccount
         {
             AccountType = accountType,
             ProviderName = providerName.Trim(),
             AccountName = accountName.Trim(),
-            CreatedDate = NormalizeMonth(startDate),
-            OpeningBalance = openingBalance
+            CreatedDate = normalizedCreatedMonth,
+            OpeningBalance = backfillDeposits ? normalizedBackfillStartBalance : currentBalance
         };
 
         Data.SavingsAccounts.Add(account);
-        SetMonthlyBalance(account.Id, NormalizeMonth(account.CreatedDate), openingBalance);
-        await PersistAndNotifyAndLogAsync(
+
+        if (!backfillDeposits)
+        {
+            SetMonthlyBalance(account.Id, normalizedCurrentPeriod, currentBalance);
+            await PersistAndNotifyAndLogAsync(
+                BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(accountType)),
+                BuildLogActivity("log.verb.added", "log.entity.savingsAccount", accountName));
+            return;
+        }
+
+        SetMonthlyBalance(account.Id, normalizedCreatedMonth, normalizedBackfillStartBalance);
+        await PersistAndNotifyAsync();
+
+        var amountToBackfill = currentBalance - normalizedBackfillStartBalance;
+        if (amountToBackfill > 0m)
+        {
+            var months = EnumerateMonths(
+                    normalizedCreatedMonth.Year,
+                    normalizedCreatedMonth.Month,
+                    normalizedCurrentPeriod.Year,
+                    normalizedCurrentPeriod.Month)
+                .Select(month => month.ToDateOnly())
+                .ToList();
+
+            var distributedAmounts = DistributeEvenlyAcrossPeriods(amountToBackfill, months.Count);
+            for (var index = 0; index < months.Count; index++)
+            {
+                if (distributedAmounts[index] <= 0m)
+                {
+                    continue;
+                }
+
+                await AddSavingsDepositAsync(account.Id, months[index], distributedAmounts[index]);
+            }
+        }
+
+        await LogActivityAsync(
             BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(accountType)),
             BuildLogActivity("log.verb.added", "log.entity.savingsAccount", accountName));
     }
@@ -558,7 +620,7 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.added", "log.entity.savingsPeriod", account.AccountName));
     }
 
-    public async Task AddSavingsDepositAsync(Guid accountId, DateOnly date, decimal amount)
+    public async Task AddSavingsDepositAsync(Guid accountId, DateOnly date, decimal amount, bool isAdjustment = false)
     {
         var account = GetSavingsAccount(accountId);
         if (amount <= 0m)
@@ -571,6 +633,12 @@ public sealed class ApplicationState
             throw new InvalidOperationException("Deposit date cannot be earlier than the account start month.");
         }
 
+        if (isAdjustment)
+        {
+            await AddSavingsBalanceAdjustmentAsync(account, date, amount);
+            return;
+        }
+
         Data.ExpenseRecords.Add(CreateSavingsDepositExpenseEntry(account, date, amount));
 
         await RecalculateSavingsAccountBalancesAsync(account.Id, NormalizeMonth(date));
@@ -579,7 +647,7 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.registered", "log.entity.deposit", account.AccountName));
     }
 
-    public async Task AddSavingsWithdrawalAsync(Guid accountId, DateOnly date, decimal amount)
+    public async Task AddSavingsWithdrawalAsync(Guid accountId, DateOnly date, decimal amount, bool isAdjustment = false)
     {
         var account = GetSavingsAccount(accountId);
         if (amount <= 0m)
@@ -596,6 +664,12 @@ public sealed class ApplicationState
         if (amount > balanceBeforeWithdrawal)
         {
             throw new InvalidOperationException("Withdrawal amount cannot exceed the account balance.");
+        }
+
+        if (isAdjustment)
+        {
+            await AddSavingsBalanceAdjustmentAsync(account, date, -amount);
+            return;
         }
 
         Data.IncomeRecords.Add(CreateOneTimeIncomeEntry(
@@ -1220,6 +1294,58 @@ public sealed class ApplicationState
         return GetMonthlyOverview(latest.Year, latest.Month);
     }
 
+    public BudgetOverview GetBudgetOverview()
+    {
+        var closedMonths = GetLatestClosedMonths(12);
+        if (closedMonths.Count == 0)
+        {
+            return new BudgetOverview();
+        }
+
+        decimal income = 0m;
+        decimal housing = 0m;
+        decimal food = 0m;
+        decimal transport = 0m;
+        decimal clothing = 0m;
+        decimal savings = 0m;
+        decimal other = 0m;
+        decimal credits = 0m;
+
+        foreach (var month in closedMonths)
+        {
+            var overview = GetMonthlyOverview(month.Year, month.Month);
+            income += overview.Income;
+            housing += overview.Housing;
+            food += overview.Food;
+            transport += overview.Transport;
+            clothing += overview.Clothing;
+            savings += overview.Savings;
+            other += overview.Other;
+            credits += overview.Credits;
+        }
+
+        var count = closedMonths.Count;
+        var firstMonth = closedMonths[0];
+        var lastMonth = closedMonths[^1];
+
+        return new BudgetOverview
+        {
+            Income = income / count,
+            Housing = housing / count,
+            Food = food / count,
+            Transport = transport / count,
+            Clothing = clothing / count,
+            Savings = savings / count,
+            Other = other / count,
+            Credits = credits / count,
+            ClosedMonthCount = count,
+            StartYear = firstMonth.Year,
+            StartMonth = firstMonth.Month,
+            EndYear = lastMonth.Year,
+            EndMonth = lastMonth.Month
+        };
+    }
+
     public DashboardKeyMetrics GetCurrentDashboardKeyMetrics()
     {
         var currentMonth = GetCurrentMonth().ToDateOnly();
@@ -1247,6 +1373,96 @@ public sealed class ApplicationState
         };
     }
 
+    public IReadOnlyList<ClosedMonth> GetClosedMonths() =>
+        Data.ClosedMonths
+            .OrderBy(month => month.Year)
+            .ThenBy(month => month.Month)
+            .ToList();
+
+    public bool IsMonthClosed(DateOnly month)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        return Data.ClosedMonths.Any(item => item.Year == normalizedMonth.Year && item.Month == normalizedMonth.Month);
+    }
+
+    public CloseMonthContext GetCloseMonthContext(DateOnly month)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+
+        return new CloseMonthContext
+        {
+            Month = normalizedMonth,
+            IsClosed = IsMonthClosed(normalizedMonth),
+            Surplus = GetMonthlyIncome(normalizedMonth.Year, normalizedMonth.Month) - GetMonthlyExpenses(normalizedMonth.Year, normalizedMonth.Month),
+            BankAccounts = Data.SavingsAccounts
+                .Where(account => account.AccountType == SavingsAccountType.Bank)
+                .OrderBy(account => account.AccountName)
+                .ToList(),
+            FundAccounts = Data.SavingsAccounts
+                .Where(account => account.AccountType == SavingsAccountType.Fund)
+                .OrderBy(account => account.AccountName)
+                .ToList()
+        };
+    }
+
+    public async Task<bool> CloseMonthAsync(DateOnly month, CloseMonthSurplusAction surplusAction, Guid? savingsAccountId = null)
+    {
+        var normalizedMonth = NormalizeMonth(month);
+        if (IsMonthClosed(normalizedMonth))
+        {
+            return false;
+        }
+
+        var surplus = GetMonthlyIncome(normalizedMonth.Year, normalizedMonth.Month) - GetMonthlyExpenses(normalizedMonth.Year, normalizedMonth.Month);
+        if (surplus <= 0m)
+        {
+            surplusAction = CloseMonthSurplusAction.DoNothing;
+            savingsAccountId = null;
+        }
+
+        switch (surplusAction)
+        {
+            case CloseMonthSurplusAction.DoNothing:
+                break;
+            case CloseMonthSurplusAction.RegisterExpense:
+                await AddOneTimeExpenseAsync(
+                    surplus,
+                    normalizedMonth.Year,
+                    normalizedMonth.Month,
+                    ExpenseCategory.Other,
+                    UnspecifiedSubcategory,
+                    string.Empty);
+                break;
+            case CloseMonthSurplusAction.DepositToBankSavings:
+                await AddSurplusDepositAsync(normalizedMonth, surplus, savingsAccountId, SavingsAccountType.Bank);
+                break;
+            case CloseMonthSurplusAction.DepositToFundSavings:
+                await AddSurplusDepositAsync(normalizedMonth, surplus, savingsAccountId, SavingsAccountType.Fund);
+                break;
+            default:
+                throw new InvalidOperationException("The selected surplus action is not supported.");
+        }
+
+        if (IsMonthClosed(normalizedMonth))
+        {
+            return false;
+        }
+
+        Data.ClosedMonths.Add(new ClosedMonth
+        {
+            Year = normalizedMonth.Year,
+            Month = normalizedMonth.Month
+        });
+
+        NormalizeClosedMonths();
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.start"], _localizer["start.monthlyReport"]),
+            BuildLogActivity("log.verb.closed", "log.entity.closedMonth", $"{normalizedMonth:yyyy-MM}"));
+
+        return true;
+    }
+
     public string GetExpenseSubcategoryDisplay(ExpenseEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
@@ -1269,15 +1485,63 @@ public sealed class ApplicationState
     }
 
     public IReadOnlyList<string> GetExpenseSubcategorySuggestions(ExpenseCategory category) =>
-        Data.ExpenseRecords
-            .Where(record => record.Category == category && !string.IsNullOrWhiteSpace(record.Subcategory))
-            .Select(record => record.Subcategory.Trim())
+        GetConfiguredSubcategorySuggestions(category)
+            .Concat(Data.ExpenseRecords
+                .Where(record => record.Category == category && !string.IsNullOrWhiteSpace(record.Subcategory))
+                .Select(record => GetLocalizedConfiguredSubcategoryLabel(MapExpenseCategoryToMainCategory(category), record.Subcategory.Trim())))
             .Concat(Data.Subscriptions
                 .Where(record => record.Category == category && !string.IsNullOrWhiteSpace(record.Subcategory))
-                .Select(record => record.Subcategory.Trim()))
+                .Select(record => GetLocalizedConfiguredSubcategoryLabel(MapExpenseCategoryToMainCategory(category), record.Subcategory.Trim())))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(value => value)
             .ToList();
+
+    public IReadOnlyList<string> GetIncomeTypeSuggestions() =>
+        Data.SubcategoryDefinitions
+            .Where(definition => definition.MainCategory == SubcategoryMainCategory.Income)
+            .Select(GetSubcategoryDisplay)
+            .Concat(Data.IncomeRecords.Select(record => GetIncomeTypeDisplay(record.Type)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(value => value)
+            .ToList();
+
+    public IReadOnlyList<SubcategoryDefinition> GetSubcategoryDefinitions(SubcategoryMainCategory mainCategory) =>
+        Data.SubcategoryDefinitions
+            .Where(definition => definition.MainCategory == mainCategory)
+            .OrderBy(definition => GetSubcategoryDisplay(definition), StringComparer.CurrentCultureIgnoreCase)
+            .Select(CloneSubcategoryDefinition)
+            .ToList();
+
+    public async Task SaveSubcategoryDefinitionsAsync(SubcategoryMainCategory mainCategory, IEnumerable<SubcategoryDefinition> definitions)
+    {
+        ArgumentNullException.ThrowIfNull(definitions);
+
+        var normalizedDefinitions = definitions
+            .Select(definition => new SubcategoryDefinition
+            {
+                Id = definition.Id == Guid.Empty ? Guid.NewGuid() : definition.Id,
+                Key = string.IsNullOrWhiteSpace(definition.Key) ? $"subcategory.custom.{Guid.NewGuid():N}" : definition.Key.Trim(),
+                MainCategory = mainCategory,
+                SwedishName = definition.SwedishName.Trim(),
+                EnglishName = definition.EnglishName.Trim()
+            })
+            .Where(definition => !string.IsNullOrWhiteSpace(definition.SwedishName) && !string.IsNullOrWhiteSpace(definition.EnglishName))
+            .GroupBy(definition => definition.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .OrderBy(definition => definition.SwedishName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        Data.SubcategoryDefinitions = Data.SubcategoryDefinitions
+            .Where(definition => definition.MainCategory != mainCategory)
+            .Concat(normalizedDefinitions)
+            .ToList();
+
+        NormalizeSubcategoryDefinitions();
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.settings"], _localizer["settings.tab.regional"]),
+            BuildLogActivity("log.verb.saved", "log.entity.subcategory", _localizer[$"subcategoryMainCategory.{mainCategory}"]));
+    }
 
     public string GetExpenseLabelDisplay(string subcategory) => GetLocalizedExpenseLabel(subcategory);
 
@@ -1302,6 +1566,11 @@ public sealed class ApplicationState
 
     public string GetIncomeTypeDisplay(string type)
     {
+        if (TryGetConfiguredSubcategoryDisplay(SubcategoryMainCategory.Income, type, out var configuredDisplay))
+        {
+            return configuredDisplay;
+        }
+
         var normalizedType = NormalizeSystemIncomeType(type);
         return normalizedType switch
         {
@@ -1432,6 +1701,8 @@ public sealed class ApplicationState
             rows.Add(new MonthlyReportRow
             {
                 Period = $"{month.Year:0000}/{month.Month:00}",
+                Year = month.Year,
+                Month = month.Month,
                 Income = income,
                 Expenses = expenses,
                 HousingLoans = housingLoans,
@@ -1439,7 +1710,8 @@ public sealed class ApplicationState
                 Savings = savings,
                 Interest = interest,
                 Amortization = amortization,
-                Balance = balance
+                Balance = balance,
+                IsClosed = IsMonthClosed(monthDate)
             });
         }
 
@@ -1720,6 +1992,7 @@ public sealed class ApplicationState
         var account = Data.SavingsAccounts.FirstOrDefault(item => item.Id == accountId);
         Data.SavingsAccounts.RemoveAll(item => item.Id == accountId);
         Data.SavingsReturnPeriods.RemoveAll(period => period.SavingsAccountId == accountId);
+        Data.SavingsBalanceAdjustments.RemoveAll(item => item.SavingsAccountId == accountId);
         Data.SavingsGeneratedReturns.RemoveAll(item => item.SavingsAccountId == accountId);
         Data.ExpenseRecords.RemoveAll(expense => expense.SavingsAccountId == accountId);
         Data.IncomeRecords.RemoveAll(income => income.SavingsAccountId == accountId);
@@ -1920,6 +2193,7 @@ public sealed class ApplicationState
         Data.Members ??= [];
         Data.IncomeRecords ??= [];
         Data.SalaryIncomePeriods ??= [];
+        Data.SubcategoryDefinitions ??= [];
         Data.ExpenseRecords ??= [];
         Data.Subscriptions ??= [];
         Data.HousingDefinitions ??= [];
@@ -1931,11 +2205,13 @@ public sealed class ApplicationState
         Data.LoanInterestBindingPeriods ??= [];
         Data.LoanAmortizationPlans ??= [];
         Data.MonthlyBalances ??= [];
+        Data.ClosedMonths ??= [];
         Data.TransportLeasingContracts ??= [];
         Data.Credits ??= [];
         Data.Debts ??= [];
         Data.SavingsAccounts ??= [];
         Data.SavingsReturnPeriods ??= [];
+        Data.SavingsBalanceAdjustments ??= [];
         Data.SavingsGeneratedReturns ??= [];
         Data.Savings ??= [];
         Data.Assets ??= [];
@@ -2007,6 +2283,9 @@ public sealed class ApplicationState
         {
             expense.Metadata ??= string.Empty;
         }
+
+        NormalizeSubcategoryDefinitions();
+        NormalizeClosedMonths();
 
         foreach (var asset in Data.Assets)
         {
@@ -3029,6 +3308,11 @@ public sealed class ApplicationState
             return string.Empty;
         }
 
+        if (TryGetConfiguredSubcategoryDisplay(null, trimmedSubcategory, out var configuredDisplay))
+        {
+            return configuredDisplay;
+        }
+
         if (string.Equals(trimmedSubcategory, InterestSubcategory, StringComparison.Ordinal))
         {
             return _localizer["table.interest"];
@@ -3057,6 +3341,11 @@ public sealed class ApplicationState
         if (string.Equals(trimmedSubcategory, "Stock", StringComparison.Ordinal))
         {
             return _localizer["savings.stocksTab"];
+        }
+
+        if (string.Equals(trimmedSubcategory, UnspecifiedSubcategory, StringComparison.Ordinal))
+        {
+            return _localizer["start.unspecified"];
         }
 
         if (trimmedSubcategory.EndsWith($" - {InterestSubcategory}", StringComparison.Ordinal))
@@ -3096,6 +3385,159 @@ public sealed class ApplicationState
     private bool MatchesLocalizedOrStableValue(string value, string stableValue, string localizationKey) =>
         string.Equals(value, stableValue, StringComparison.Ordinal) ||
         string.Equals(value, _localizer[localizationKey], StringComparison.Ordinal);
+
+    private static IReadOnlyList<SubcategoryDefinition> GetDefaultSubcategoryDefinitions() =>
+    [
+        new() { Key = "subcategory.income.salary", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Lön", EnglishName = "Salary" },
+        new() { Key = "subcategory.income.inheritance", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Arv", EnglishName = "Inheritance" },
+        new() { Key = "subcategory.income.interest", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Ränta", EnglishName = "Interest" },
+        new() { Key = "subcategory.income.gambling_winnings", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Spelvinst", EnglishName = "Gambling winnings" },
+        new() { Key = "subcategory.income.dividend", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Utdelning", EnglishName = "Dividend" },
+        new() { Key = "subcategory.income.withdrawal", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Uttag", EnglishName = "Withdrawal" },
+        new() { Key = "subcategory.food.grocery", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Matbutik", EnglishName = "Grocery store" },
+        new() { Key = "subcategory.food.delivery", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Hemkörning", EnglishName = "Delivery" },
+        new() { Key = "subcategory.food.restaurant", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Restaurang", EnglishName = "Restaurant" },
+        new() { Key = "subcategory.food.lunch", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Lunch", EnglishName = "Lunch" },
+        new() { Key = "subcategory.housing.rent", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Hyra", EnglishName = "Rent" },
+        new() { Key = "subcategory.housing.monthly_fee", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Månadsavgift", EnglishName = "Monthly fee" },
+        new() { Key = "subcategory.housing.electricity", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "El", EnglishName = "Electricity" },
+        new() { Key = "subcategory.housing.heating", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Uppvärmning", EnglishName = "Heating" },
+        new() { Key = "subcategory.housing.garbage_collection", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Sophämtning", EnglishName = "Garbage collection" },
+        new() { Key = "subcategory.housing.water", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Vatten", EnglishName = "Water" },
+        new() { Key = "subcategory.housing.amortization", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Amortering", EnglishName = "Amortization" },
+        new() { Key = "subcategory.housing.interest", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Ränta", EnglishName = "Interest" },
+        new() { Key = "subcategory.housing.home_insurance", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Hemförsäkring", EnglishName = "Home insurance" },
+        new() { Key = "subcategory.housing.broadband", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Bredband", EnglishName = "Broadband" },
+        new() { Key = "subcategory.housing.maintenance", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Underhåll", EnglishName = "Maintenance" },
+        new() { Key = "subcategory.housing.operating_costs", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Driftkostnader", EnglishName = "Operating costs" },
+        new() { Key = "subcategory.housing.alarm", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Larm", EnglishName = "Alarm" },
+        new() { Key = "subcategory.transport.petrol", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Bensin", EnglishName = "Petrol" },
+        new() { Key = "subcategory.transport.diesel", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Diesel", EnglishName = "Diesel" },
+        new() { Key = "subcategory.transport.electricity", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "El", EnglishName = "Electricity" },
+        new() { Key = "subcategory.transport.car_insurance", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Bilförsäkring", EnglishName = "Car insurance" },
+        new() { Key = "subcategory.transport.vehicle_tax", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Fordonskatt", EnglishName = "Vehicle tax" },
+        new() { Key = "subcategory.transport.service", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Service", EnglishName = "Service" },
+        new() { Key = "subcategory.transport.repair", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Reparation", EnglishName = "Repair" },
+        new() { Key = "subcategory.transport.tires", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Däck", EnglishName = "Tires" },
+        new() { Key = "subcategory.transport.parking", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Parkering", EnglishName = "Parking" },
+        new() { Key = "subcategory.transport.public_transport", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Kollektivtrafik", EnglishName = "Public transport" },
+        new() { Key = "subcategory.transport.train", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Tåg", EnglishName = "Train" },
+        new() { Key = "subcategory.transport.flight", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Flyg", EnglishName = "Flight" },
+        new() { Key = "subcategory.transport.amortization", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Amortering", EnglishName = "Amortization" },
+        new() { Key = "subcategory.transport.interest", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Ränta", EnglishName = "Interest" },
+        new() { Key = "subcategory.clothing.everyday_clothes", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Vardagskläder", EnglishName = "Everyday clothes" },
+        new() { Key = "subcategory.clothing.shoes", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Skor", EnglishName = "Shoes" },
+        new() { Key = "subcategory.clothing.jacket", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Jacka", EnglishName = "Jacket" },
+        new() { Key = "subcategory.clothing.trousers", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Byxa", EnglishName = "Trousers" },
+        new() { Key = "subcategory.clothing.underwear", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Underkläder", EnglishName = "Underwear" },
+        new() { Key = "subcategory.clothing.childrens_clothes", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Barnkläder", EnglishName = "Children's clothes" },
+        new() { Key = "subcategory.other.charity", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Välgörenhet", EnglishName = "Charity" },
+        new() { Key = "subcategory.other.cloud_services", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Molntjänster", EnglishName = "Cloud services" },
+        new() { Key = "subcategory.other.streaming", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Streaming", EnglishName = "Streaming" },
+        new() { Key = "subcategory.other.healthcare", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Hälsa och vård", EnglishName = "Health and care" },
+        new() { Key = "subcategory.other.computers_accessories", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Dator och tillbehör", EnglishName = "Computer and accessories" },
+        new() { Key = "subcategory.other.audio_video", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Ljud och Bild", EnglishName = "Audio and video" },
+        new() { Key = "subcategory.other.education", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Utbildning", EnglishName = "Education" },
+        new() { Key = "subcategory.other.travel", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Resor", EnglishName = "Travel" },
+        new() { Key = "subcategory.other.entertainment", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Nöjen", EnglishName = "Entertainment" },
+        new() { Key = "subcategory.other.unspecified", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Ospecificerat", EnglishName = "Unspecified" }
+    ];
+
+    private void NormalizeSubcategoryDefinitions()
+    {
+        var shouldSeedDefaults = !Data.HasInitializedSubcategoryDefinitions && Data.SubcategoryDefinitions.Count == 0;
+
+        var definitions = Data.SubcategoryDefinitions
+            .Where(definition => definition.MainCategory != 0)
+            .Select(definition => new SubcategoryDefinition
+            {
+                Id = definition.Id == Guid.Empty ? Guid.NewGuid() : definition.Id,
+                Key = string.IsNullOrWhiteSpace(definition.Key) ? $"subcategory.custom.{Guid.NewGuid():N}" : definition.Key.Trim(),
+                MainCategory = definition.MainCategory,
+                SwedishName = definition.SwedishName?.Trim() ?? string.Empty,
+                EnglishName = definition.EnglishName?.Trim() ?? string.Empty
+            })
+            .Where(definition => !string.IsNullOrWhiteSpace(definition.SwedishName) && !string.IsNullOrWhiteSpace(definition.EnglishName))
+            .GroupBy(definition => definition.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+
+        if (shouldSeedDefaults)
+        {
+            foreach (var defaultDefinition in GetDefaultSubcategoryDefinitions())
+            {
+                definitions.Add(CloneSubcategoryDefinition(defaultDefinition));
+            }
+        }
+
+        Data.SubcategoryDefinitions = definitions
+            .OrderBy(definition => definition.MainCategory)
+            .ThenBy(definition => definition.SwedishName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        Data.HasInitializedSubcategoryDefinitions = true;
+    }
+
+    private IReadOnlyList<string> GetConfiguredSubcategorySuggestions(ExpenseCategory category)
+    {
+        var mainCategory = MapExpenseCategoryToMainCategory(category);
+        if (!mainCategory.HasValue)
+        {
+            return [];
+        }
+
+        return Data.SubcategoryDefinitions
+            .Where(definition => definition.MainCategory == mainCategory.Value)
+            .Select(GetSubcategoryDisplay)
+            .ToList();
+    }
+
+    private bool TryGetConfiguredSubcategoryDisplay(SubcategoryMainCategory? mainCategory, string value, out string display)
+    {
+        var trimmedValue = value?.Trim() ?? string.Empty;
+        var definition = Data.SubcategoryDefinitions.FirstOrDefault(item =>
+            (!mainCategory.HasValue || item.MainCategory == mainCategory.Value) &&
+            (string.Equals(item.SwedishName, trimmedValue, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(item.EnglishName, trimmedValue, StringComparison.OrdinalIgnoreCase)));
+
+        if (definition is null)
+        {
+            display = trimmedValue;
+            return false;
+        }
+
+        display = GetSubcategoryDisplay(definition);
+        return true;
+    }
+
+    private string GetLocalizedConfiguredSubcategoryLabel(SubcategoryMainCategory? mainCategory, string value) =>
+        TryGetConfiguredSubcategoryDisplay(mainCategory, value, out var display)
+            ? display
+            : value.Trim();
+
+    private string GetSubcategoryDisplay(SubcategoryDefinition definition) =>
+        string.Equals(_localizer.CurrentLanguage, "sv", StringComparison.OrdinalIgnoreCase)
+            ? definition.SwedishName
+            : definition.EnglishName;
+
+    private static SubcategoryDefinition CloneSubcategoryDefinition(SubcategoryDefinition definition) => new()
+    {
+        Id = definition.Id,
+        Key = definition.Key,
+        MainCategory = definition.MainCategory,
+        SwedishName = definition.SwedishName,
+        EnglishName = definition.EnglishName
+    };
+
+    private static SubcategoryMainCategory? MapExpenseCategoryToMainCategory(ExpenseCategory category) => category switch
+    {
+        ExpenseCategory.Food => SubcategoryMainCategory.Food,
+        ExpenseCategory.Housing => SubcategoryMainCategory.Housing,
+        ExpenseCategory.Transport => SubcategoryMainCategory.Transport,
+        ExpenseCategory.Clothing => SubcategoryMainCategory.Clothing,
+        ExpenseCategory.Other => SubcategoryMainCategory.Other,
+        _ => null
+    };
 
     private void RemoveGeneratedCreditExpensesInRange(DateOnly startDate, DateOnly endDate)
     {
@@ -3300,6 +3742,9 @@ public sealed class ApplicationState
         var endCandidates = Data.SavingsReturnPeriods
             .Where(period => period.SavingsAccountId == accountId)
             .Select(period => NormalizeMonth(period.EndDate))
+            .Concat(Data.SavingsBalanceAdjustments
+                .Where(item => item.SavingsAccountId == accountId)
+                .Select(item => NormalizeMonth(new DateOnly(item.Year, item.Month, 1))))
             .Concat(Data.ExpenseRecords
                 .Where(entry => entry.SavingsAccountId == accountId)
                 .Select(entry => NormalizeMonth(new DateOnly(entry.Year, entry.Month, 1))))
@@ -3361,6 +3806,7 @@ public sealed class ApplicationState
         var startCandidates = Data.SavingsAccounts
             .Select(account => account.CreatedDate)
             .Concat(Data.SavingsReturnPeriods.Select(period => period.StartDate))
+            .Concat(Data.SavingsBalanceAdjustments.Select(item => new DateOnly(item.Year, item.Month, 1)))
             .Concat(Data.ExpenseRecords
                 .Where(entry => entry.SavingsAccountId.HasValue)
                 .Select(entry => new DateOnly(entry.Year, entry.Month, 1)))
@@ -3378,6 +3824,7 @@ public sealed class ApplicationState
 
         var endCandidates = Data.SavingsReturnPeriods
             .Select(period => period.EndDate)
+            .Concat(Data.SavingsBalanceAdjustments.Select(item => new DateOnly(item.Year, item.Month, 1)))
             .Concat(Data.ExpenseRecords
                 .Where(entry => entry.SavingsAccountId.HasValue)
                 .Select(entry => new DateOnly(entry.Year, entry.Month, 1)))
@@ -3425,7 +3872,13 @@ public sealed class ApplicationState
                 NormalizeMonth(new DateOnly(entry.Year, entry.Month, 1)) <= inclusiveMonth)
             .Sum(entry => entry.Amount);
 
-        return deposits - withdrawals;
+        var adjustments = Data.SavingsBalanceAdjustments
+            .Where(item =>
+                item.SavingsAccountId == accountId &&
+                NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) <= inclusiveMonth)
+            .Sum(item => item.Amount);
+
+        return deposits - withdrawals + adjustments;
     }
 
     private decimal GetSavingsManualNetChangeForMonth(Guid accountId, DateOnly month)
@@ -3444,7 +3897,87 @@ public sealed class ApplicationState
                 NormalizeMonth(new DateOnly(entry.Year, entry.Month, 1)) == normalizedMonth)
             .Sum(entry => entry.Amount);
 
-        return deposits - withdrawals;
+        var adjustments = Data.SavingsBalanceAdjustments
+            .Where(item =>
+                item.SavingsAccountId == accountId &&
+                NormalizeMonth(new DateOnly(item.Year, item.Month, 1)) == normalizedMonth)
+            .Sum(item => item.Amount);
+
+        return deposits - withdrawals + adjustments;
+    }
+
+    private IReadOnlyList<ClosedMonth> GetLatestClosedMonths(int count) =>
+        Data.ClosedMonths
+            .OrderByDescending(month => month.Year)
+            .ThenByDescending(month => month.Month)
+            .Take(count)
+            .OrderBy(month => month.Year)
+            .ThenBy(month => month.Month)
+            .ToList();
+
+    private async Task AddSurplusDepositAsync(DateOnly month, decimal surplus, Guid? accountId, SavingsAccountType expectedAccountType)
+    {
+        if (!accountId.HasValue)
+        {
+            throw new InvalidOperationException("A savings account must be selected.");
+        }
+
+        var account = GetSavingsAccount(accountId.Value);
+        if (account.AccountType != expectedAccountType)
+        {
+            throw new InvalidOperationException("The selected savings account type is not valid for this action.");
+        }
+
+        await AddSavingsDepositAsync(account.Id, month, surplus);
+    }
+
+    private async Task AddSavingsBalanceAdjustmentAsync(SavingsAccount account, DateOnly date, decimal amount)
+    {
+        Data.SavingsBalanceAdjustments.Add(new SavingsBalanceAdjustment
+        {
+            SavingsAccountId = account.Id,
+            Year = date.Year,
+            Month = date.Month,
+            Amount = amount
+        });
+
+        await RecalculateSavingsAccountBalancesAsync(account.Id, NormalizeMonth(date));
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(account.AccountType)),
+            BuildLogActivity("log.verb.registered", "log.entity.balanceAdjustment", account.AccountName));
+    }
+
+    private static IReadOnlyList<decimal> DistributeEvenlyAcrossPeriods(decimal totalAmount, int periodCount)
+    {
+        if (periodCount <= 0)
+        {
+            throw new InvalidOperationException("At least one period is required for distribution.");
+        }
+
+        if (totalAmount <= 0m)
+        {
+            return Enumerable.Repeat(0m, periodCount).ToList();
+        }
+
+        var equalAmount = totalAmount / periodCount;
+        var amounts = Enumerable.Repeat(equalAmount, periodCount).ToList();
+        amounts[^1] = totalAmount - amounts.Take(periodCount - 1).Sum();
+        return amounts;
+    }
+
+    private void NormalizeClosedMonths()
+    {
+        Data.ClosedMonths = Data.ClosedMonths
+            .Where(month => month.Year > 0 && month.Month is >= 1 and <= 12)
+            .GroupBy(month => new { month.Year, month.Month })
+            .Select(group => new ClosedMonth
+            {
+                Year = group.Key.Year,
+                Month = group.Key.Month
+            })
+            .OrderBy(month => month.Year)
+            .ThenBy(month => month.Month)
+            .ToList();
     }
 
     private decimal GetLoanDebtForMonth(DateOnly loanStartDate, decimal startingRemainingDebt, Guid loanId, ExpenseCategory category, DateOnly reportMonth) =>
