@@ -4,7 +4,7 @@
 @inject LocalizationService Localizer
 @inject ApplicationState AppState
 
-<MudDialog>
+<MudDialog Class="bank-import-preview-dialog">
     <DialogContent>
         @if (!isImporting)
         {
@@ -42,10 +42,28 @@
             <div class="status-banner mb-3">@validationMessage</div>
         }
 
+        @if (HasLatestImportedExpenseDate)
+        {
+            <div class="status-banner mb-3 bank-import-filter-banner">
+                @if (!showAllRows)
+                {
+                    <span>@string.Format(Localizer["expenses.import.filteredFromDate"], LatestImportedExpenseDate!.Value.ToString("yyyy-MM-dd"))</span>
+                }
+
+                <div class="form-check mb-0">
+                    <InputCheckbox class="form-check-input"
+                                   @bind-Value="showAllRows"
+                                   @bind-Value:after="HandleShowAllRowsChanged"
+                                   disabled="@isImporting" />
+                    <label class="form-check-label">@Localizer["filter.showAll"]</label>
+                </div>
+            </div>
+        }
+
         <div class="form-grid mb-3">
             <div>
                 <label class="form-label">@Localizer["field.description"]</label>
-                <InputText class="form-control" @bind-Value="descriptionFilter" />
+                <InputText class="form-control" @bind-Value="descriptionFilter" @bind-Value:after="HandleDescriptionFilterChanged" />
             </div>
         </div>
 
@@ -54,64 +72,119 @@
                 <thead>
                     <tr>
                         <th>
-                            <InputCheckbox @bind-Value="selectAllRows" @bind-Value:after="HandleSelectAllRowsChanged" />
+                            <InputCheckbox @bind-Value="selectAllRows"
+                                           @bind-Value:after="HandleSelectAllRowsChanged"
+                                           disabled="@(isImporting || FilteredRows.Count == 0)" />
                         </th>
                         <th>@Localizer["field.description"]</th>
+                        <th>
+                            <div class="table-actions-header">
+                                <span>@Localizer["field.hide"]</span>
+                                <MudIconButton Icon="@Icons.Material.Filled.Visibility"
+                                               title="@Localizer["expenses.import.showAllHiddenRows"]"
+                                               aria-label="@Localizer["expenses.import.showAllHiddenRows"]"
+                                               Size="Size.Small"
+                                               OnClick="ShowAllHiddenRows"
+                                               Disabled="@isImporting" />
+                            </div>
+                        </th>
                         <th>@Localizer["field.date"]</th>
                         <th>@Localizer["field.amount"]</th>
                         <th>@Localizer["field.category"]</th>
                         <th>@Localizer["field.subcategory"]</th>
+                        <th>
+                            <div class="table-actions-header">
+                                <span>@Localizer["field.use"]</span>
+                                <MudIconButton Icon="@Icons.Material.Filled.DeleteSweep"
+                                               title="@Localizer["expenses.import.clearApplyHistory"]"
+                                               aria-label="@Localizer["expenses.import.clearApplyHistory"]"
+                                               Size="Size.Small"
+                                               OnClick="ClearApplyHistoryAsync"
+                                               Disabled="@(isImporting || !HasApplySuggestionHistory)" />
+                            </div>
+                        </th>
                         <th>@Localizer["expenses.import.recurring"]</th>
                         <th>@Localizer["field.start"]</th>
                         <th>@Localizer["field.endDate"]</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var row in FilteredRows)
+                    @if (FilteredRows.Count == 0)
                     {
-                        <tr class="@(row.IsLeaving ? "bank-import-row-leaving" : string.Empty)">
-                            <td>
-                                <InputCheckbox @bind-Value="row.Include"
-                                               @bind-Value:after="() => HandleRowIncludeChanged(row)"
-                                               disabled="@isImporting" />
-                            </td>
-                            <td>@row.Description</td>
-                            <td>@row.TransactionDate.ToString("yyyy-MM-dd")</td>
-                            <td>@AppState.FormatCurrency(row.Amount)</td>
-                            <td>
-                                <InputSelect class="form-select" @bind-Value="row.Category" disabled="@isImporting">
-                                    @foreach (var category in ExpenseCategories)
-                                    {
-                                        <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
-                                    }
-                                </InputSelect>
-                            </td>
-                            <td>
-                                <InputText class="form-control"
-                                           @bind-Value="row.Subcategory"
-                                           list="@GetSubcategoryListId(row)"
-                                           disabled="@isImporting" />
-                                <datalist id="@GetSubcategoryListId(row)">
-                                    @foreach (var suggestion in AppState.GetExpenseSubcategorySuggestions(row.Category))
-                                    {
-                                        <option value="@suggestion"></option>
-                                    }
-                                </datalist>
-                            </td>
-                            <td>
-                                <InputCheckbox @bind-Value="row.IsRecurring" disabled="@isImporting" />
-                            </td>
-                            <td>
-                                <InputDate class="form-control"
-                                           @bind-Value="row.StartDate"
-                                           disabled="@(!row.IsRecurring || isImporting)" />
-                            </td>
-                            <td>
-                                <InputDate class="form-control"
-                                           @bind-Value="row.EndDate"
-                                           disabled="@(!row.IsRecurring || isImporting)" />
-                            </td>
+                        <tr>
+                            <td colspan="11">@Localizer["expenses.import.noRowsAfterFilters"]</td>
                         </tr>
+                    }
+                    else
+                    {
+                        @foreach (var row in FilteredRows)
+                        {
+                            <tr class="@(row.IsLeaving ? "bank-import-row-leaving" : string.Empty)">
+                                <td>
+                                    <InputCheckbox @bind-Value="row.Include"
+                                                   @bind-Value:after="() => HandleRowIncludeChanged(row)"
+                                                   disabled="@isImporting" />
+                                </td>
+                                <td>@row.Description</td>
+                                <td>
+                                    <MudIconButton Icon="@Icons.Material.Filled.VisibilityOff"
+                                                   title="@Localizer["expenses.import.hideMatchingRows"]"
+                                                   aria-label="@Localizer["expenses.import.hideMatchingRows"]"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => HideMatchingRows(row))"
+                                                   Disabled="@isImporting" />
+                                </td>
+                                <td>@row.TransactionDate.ToString("yyyy-MM-dd")</td>
+                                <td>@AppState.FormatCurrency(row.Amount)</td>
+                                <td>
+                                    <InputSelect class="form-select" @bind-Value="row.Category" disabled="@isImporting">
+                                        @foreach (var category in ExpenseCategories)
+                                        {
+                                            <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
+                                        }
+                                    </InputSelect>
+                                </td>
+                                <td>
+                                    <InputText class="form-control"
+                                               @bind-Value="row.Subcategory"
+                                               @bind-Value:after="() => HandleSubcategoryChanged(row)"
+                                               list="@GetSubcategoryListId(row)"
+                                               disabled="@isImporting" />
+                                    <datalist id="@GetSubcategoryListId(row)">
+                                        @foreach (var suggestion in AppState.GetExpenseSubcategorySuggestions(row.Category))
+                                        {
+                                            <option value="@suggestion"></option>
+                                        }
+                                    </datalist>
+                                </td>
+                                <td>
+                                    <div class="button-row">
+                                        @foreach (var suggestion in GetApplySuggestions(row))
+                                        {
+                                            <button type="button"
+                                                    class="btn btn-outline-secondary btn-sm bank-import-apply-button"
+                                                    @onclick="() => ApplySuggestion(row, suggestion)"
+                                                    disabled="@isImporting">
+                                                @GetSuggestionLabel(suggestion)
+                                            </button>
+                                        }
+                                    </div>
+                                </td>
+                                <td>
+                                    <InputCheckbox @bind-Value="row.IsRecurring" disabled="@isImporting" />
+                                </td>
+                                <td>
+                                    <InputDate class="form-control"
+                                               @bind-Value="row.StartDate"
+                                               disabled="@(!row.IsRecurring || isImporting)" />
+                                </td>
+                                <td>
+                                    <InputDate class="form-control"
+                                               @bind-Value="row.EndDate"
+                                               disabled="@(!row.IsRecurring || isImporting)" />
+                                </td>
+                            </tr>
+                        }
                     }
                 </tbody>
             </table>
@@ -133,6 +206,39 @@
     </DialogActions>
 </MudDialog>
 
+<style>
+    .bank-import-preview-dialog .mud-dialog {
+        max-width: 1480px;
+        width: min(1480px, calc(100vw - 24px));
+        min-height: min(860px, calc(100vh - 24px));
+        max-height: calc(100vh - 24px);
+    }
+
+    .bank-import-preview-dialog .mud-dialog-content {
+        overflow-y: auto;
+    }
+
+    .bank-import-filter-banner {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .bank-import-apply-button {
+        white-space: nowrap;
+    }
+
+    @@media (max-width: 899px) {
+        .bank-import-preview-dialog .mud-dialog {
+            width: calc(100vw - 16px);
+            min-height: calc(100vh - 16px);
+            max-height: calc(100vh - 16px);
+        }
+    }
+</style>
+
 @code {
     [CascadingParameter]
     private IMudDialogInstance MudDialog { get; set; } = default!;
@@ -150,12 +256,20 @@
 
     private readonly List<ImportPreviewRowModel> rows = [];
     private readonly List<string> importStatuses = [];
+    private readonly HashSet<string> hiddenDescriptions = new(StringComparer.OrdinalIgnoreCase);
     private string? validationMessage;
     private string descriptionFilter = string.Empty;
     private bool selectAllRows = true;
     private bool isImporting;
+    private bool showAllRows;
     private int totalSelectedCount;
     private int importedCount;
+
+    private DateOnly? LatestImportedExpenseDate => AppState.Data.LatestImportedExpenseDate;
+
+    private bool HasLatestImportedExpenseDate => LatestImportedExpenseDate.HasValue;
+
+    private bool HasApplySuggestionHistory => AppState.Data.ImportedExpenseCategorySuggestions.Count > 0;
 
     private double ProgressValue =>
         totalSelectedCount == 0
@@ -167,6 +281,8 @@
             .Where(row =>
                 string.IsNullOrWhiteSpace(descriptionFilter) ||
                 row.Description.Contains(descriptionFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(row => showAllRows || !LatestImportedExpenseDate.HasValue || row.TransactionDate >= LatestImportedExpenseDate.Value)
+            .Where(row => !hiddenDescriptions.Contains(GetDescriptionKey(row.Description)))
             .ToList();
 
     protected override void OnInitialized()
@@ -174,7 +290,7 @@
         rows.Clear();
         rows.AddRange(Transactions.Select(transaction => new ImportPreviewRowModel
         {
-            Include = true,
+            Include = false,
             Description = transaction.Description,
             TransactionDate = transaction.TransactionDate,
             StartDate = transaction.TransactionDate.ToDateTime(TimeOnly.MinValue),
@@ -183,7 +299,7 @@
             Subcategory = string.Empty
         }));
 
-        selectAllRows = FilteredRows.Count > 0 && FilteredRows.All(row => row.Include);
+        RefreshSelectAllRows();
     }
 
     private async Task SubmitAsync()
@@ -227,6 +343,17 @@
             return;
         }
 
+        var latestImportedDate = selectedRows.Max(row => row.TransactionDate);
+        var importedSuggestions = selectedRows
+            .Where(row => !string.IsNullOrWhiteSpace(row.Subcategory))
+            .Select(row => new ImportedExpenseCategorySuggestion
+            {
+                Description = row.Description,
+                Category = row.Category,
+                Subcategory = row.Subcategory
+            })
+            .ToList();
+
         rows.RemoveAll(row => !row.Include);
         selectAllRows = false;
         isImporting = true;
@@ -261,6 +388,9 @@
             await InvokeAsync(StateHasChanged);
         }
 
+        await AppState.SaveImportedExpenseCategorySuggestionsAsync(importedSuggestions);
+        await AppState.SetLatestImportedExpenseDateAsync(latestImportedDate);
+
         await Task.Delay(250);
         MudDialog.Close(DialogResult.Ok(importedCount));
     }
@@ -279,11 +409,97 @@
 
     private Task HandleRowIncludeChanged(ImportPreviewRowModel row)
     {
-        selectAllRows = FilteredRows.Count > 0 && FilteredRows.All(item => item.Include);
+        _ = row;
+        RefreshSelectAllRows();
         return InvokeAsync(StateHasChanged);
     }
 
+    private Task HandleDescriptionFilterChanged()
+    {
+        RefreshSelectAllRows();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task HandleShowAllRowsChanged()
+    {
+        RefreshSelectAllRows();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task HideMatchingRows(ImportPreviewRowModel row)
+    {
+        hiddenDescriptions.Add(GetDescriptionKey(row.Description));
+        RefreshSelectAllRows();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task ShowAllHiddenRows()
+    {
+        hiddenDescriptions.Clear();
+        RefreshSelectAllRows();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearApplyHistoryAsync()
+    {
+        await AppState.ClearImportedExpenseCategorySuggestionsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ApplySuggestion(ImportPreviewRowModel row, ApplyCategorySuggestion suggestion)
+    {
+        row.Category = suggestion.Category;
+        row.Subcategory = suggestion.Subcategory;
+        row.Include = true;
+        RefreshSelectAllRows();
+    }
+
+    private Task HandleSubcategoryChanged(ImportPreviewRowModel row)
+    {
+        if (!row.Include && !string.IsNullOrWhiteSpace(row.Subcategory))
+        {
+            row.Include = true;
+            RefreshSelectAllRows();
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private IReadOnlyList<ApplyCategorySuggestion> GetApplySuggestions(ImportPreviewRowModel row)
+    {
+        if (row.Include)
+        {
+            return [];
+        }
+
+        return rows
+            .Where(candidate => candidate.Id != row.Id)
+            .Where(candidate => candidate.Include)
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Subcategory))
+            .Where(candidate => string.Equals(GetDescriptionKey(candidate.Description), GetDescriptionKey(row.Description), StringComparison.OrdinalIgnoreCase))
+            .Select(candidate => new ApplyCategorySuggestion(candidate.Category, candidate.Subcategory.Trim()))
+            .Concat(
+                AppState.Data.ImportedExpenseCategorySuggestions
+                    .Where(candidate => string.Equals(GetDescriptionKey(candidate.Description), GetDescriptionKey(row.Description), StringComparison.OrdinalIgnoreCase))
+                    .Select(candidate => new ApplyCategorySuggestion(candidate.Category, candidate.Subcategory.Trim())))
+            .Distinct()
+            .OrderBy(candidate => candidate.Category)
+            .ThenBy(candidate => candidate.Subcategory, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private string GetSuggestionLabel(ApplyCategorySuggestion suggestion) =>
+        $"{Localizer[$"expenseCategory.{suggestion.Category}"]} / {suggestion.Subcategory}";
+
+    private void RefreshSelectAllRows()
+    {
+        var filteredRows = FilteredRows;
+        selectAllRows = filteredRows.Count > 0 && filteredRows.All(row => row.Include);
+    }
+
     private static string GetSubcategoryListId(ImportPreviewRowModel row) => $"bank-import-subcategory-{row.Id}";
+
+    private static string GetDescriptionKey(string description) => description.Trim();
 
     private sealed class ImportPreviewRowModel
     {
@@ -309,4 +525,6 @@
 
         public string Subcategory { get; set; } = string.Empty;
     }
+
+    private sealed record ApplyCategorySuggestion(ExpenseCategory Category, string Subcategory);
 }

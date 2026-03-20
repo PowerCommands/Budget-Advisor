@@ -57,24 +57,33 @@
                                             <MudText Typo="Typo.body2"><strong>@Localizer["sync.lastDownload"]:</strong> @FormatSyncTimestamp(SyncService.Metadata.LastDownloadUtc)</MudText>
                                             <MudText Typo="Typo.body2"><strong>@Localizer["sync.files"]:</strong> @string.Join(", ", SyncService.Files.Select(file => file.DisplayName))</MudText>
 
+                                            @if (SyncService.IsBusy)
+                                            {
+                                                <div class="cloud-sync-progress">
+                                                    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Rounded="true" />
+                                                    <MudText Typo="Typo.body2">@GetSyncProgressText()</MudText>
+                                                </div>
+                                            }
+
                                             <div class="button-row">
                                                 <MudTooltip Text="@Localizer["sync.connect"]">
                                                     <MudIconButton Icon="@Icons.Material.Filled.Link"
                                                                    Color="Color.Primary"
+                                                                   Disabled="@SyncService.IsBusy"
                                                                    OnClick="HandleConnectToDropboxAsync"
                                                                    aria-label="@Localizer["sync.connect"]" />
                                                 </MudTooltip>
                                                 <MudTooltip Text="@Localizer["sync.upload"]">
                                                     <MudIconButton Icon="@Icons.Material.Filled.CloudUpload"
                                                                    Color="Color.Primary"
-                                                                   Disabled="@(!isDropboxConnected)"
+                                                                   Disabled="@(!isDropboxConnected || SyncService.IsBusy)"
                                                                    OnClick="HandleUploadToDropboxAsync"
                                                                    aria-label="@Localizer["sync.upload"]" />
                                                 </MudTooltip>
                                                 <MudTooltip Text="@Localizer["sync.download"]">
                                                     <MudIconButton Icon="@Icons.Material.Filled.CloudDownload"
                                                                    Color="Color.Secondary"
-                                                                   Disabled="@(!isDropboxConnected)"
+                                                                   Disabled="@(!isDropboxConnected || SyncService.IsBusy)"
                                                                    OnClick="HandleDownloadFromDropboxAsync"
                                                                    aria-label="@Localizer["sync.download"]" />
                                                 </MudTooltip>
@@ -735,8 +744,16 @@
 
     private string GetConnectedAccountText() =>
         string.IsNullOrWhiteSpace(SyncService.Metadata.ConnectedAccountName)
-            ? "Not available"
+            ? Localizer["sync.notAvailable"]
             : SyncService.Metadata.ConnectedAccountName;
+
+    private string GetSyncProgressText() => SyncService.ActiveOperation switch
+    {
+        "Connect" => Localizer["sync.progress.connect"],
+        "Upload" => Localizer["sync.progress.upload"],
+        "Download" => Localizer["sync.progress.download"],
+        _ => Localizer["sync.progress.default"]
+    };
 
     private string FormatSyncTimestamp(DateTimeOffset? timestampUtc) =>
         timestampUtc.HasValue

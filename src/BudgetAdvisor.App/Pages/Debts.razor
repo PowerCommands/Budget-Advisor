@@ -25,6 +25,7 @@
                 <div class="stat-card"><span>@Localizer["credits.previousMonthInterestCosts"]</span><strong>@AppState.FormatCurrency(PreviousMonthInterestCosts)</strong></div>
                 <div class="stat-card"><span>@Localizer["credits.totalCurrentDebt"]</span><strong>@AppState.FormatCurrency(TotalRemainingDebt)</strong></div>
                 <div class="stat-card"><span>@Localizer["credits.totalMaximumCredit"]</span><strong>@AppState.FormatCurrency(TotalCreditLimit)</strong></div>
+                <div class="stat-card"><span>@Localizer["credits.availableCredit"]</span><strong>@AppState.FormatCurrency(TotalAvailableCredit)</strong></div>
             </div>
         </section>
 
@@ -64,6 +65,13 @@
                                     <td>@AppState.FormatCurrency(GetAvailableCredit(credit))</td>
                                 </tr>
                             }
+
+                            <tr class="table-summary-row">
+                                <td colspan="4" class="table-summary-label">@Localizer["table.sum"]</td>
+                                <td class="table-summary-value">@AppState.FormatCurrency(TotalCreditLimit)</td>
+                                <td class="table-summary-value">@AppState.FormatCurrency(TotalRemainingDebt)</td>
+                                <td class="table-summary-value">@AppState.FormatCurrency(TotalAvailableCredit)</td>
+                            </tr>
                         }
                     </tbody>
                 </table>
@@ -237,6 +245,7 @@
     private decimal PreviousMonthInterestCosts => AppState.GetCreditInterestCostsForMonth(GetPreviousMonth());
     private decimal TotalRemainingDebt => Credits.Sum(credit => AppState.GetCreditCurrentBalance(credit.Id));
     private decimal TotalCreditLimit => Credits.Sum(credit => credit.CreditLimit);
+    private decimal TotalAvailableCredit => Credits.Sum(GetAvailableCredit);
 
     private bool IsCreditExpanded(Guid creditId) => expandedCreditIds.Contains(creditId);
 

@@ -50,6 +50,8 @@ public sealed class ManualSyncService
     public SyncMetadata Metadata { get; private set; } = CreateDefaultMetadata();
 
     public IReadOnlyList<SyncFileDescriptor> Files => SyncFiles;
+    public bool IsBusy { get; private set; }
+    public string? ActiveOperation { get; private set; }
 
     public ManualSyncService(
         LocalStorageService localStorageService,
@@ -94,95 +96,110 @@ public sealed class ManualSyncService
     {
         await EnsureInitializedAsync();
 
-        var provider = GetProvider(providerId);
-        var result = await provider.ConnectAsync(request, cancellationToken);
-        await UpdateMetadataAfterOperationAsync(provider, result, isUpload: false, isDownload: false, cancellationToken);
-        return result;
+        return await ExecuteOperationAsync(
+            "Connect",
+            async () =>
+            {
+                var provider = GetProvider(providerId);
+                var result = await provider.ConnectAsync(request, cancellationToken);
+                await UpdateMetadataAfterOperationAsync(provider, result, isUpload: false, isDownload: false, cancellationToken);
+                return result;
+            });
     }
 
     public async Task<SyncResult> UploadAsync(string providerId, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync();
 
-        var provider = GetProvider(providerId);
-        if (!await provider.IsConnectedAsync(cancellationToken))
-        {
-            return await StoreFailureAsync(provider, "Upload", "Connect to Dropbox before uploading.", cancellationToken);
-        }
-
-        var files = new List<SyncFilePayload>(SyncFiles.Count);
-        foreach (var descriptor in SyncFiles)
-        {
-            var json = await _localStorageService.LoadJsonAsync(descriptor.LocalStorageKey);
-            files.Add(new SyncFilePayload
+        return await ExecuteOperationAsync(
+            "Upload",
+            async () =>
             {
-                Descriptor = descriptor,
-                Content = json ?? string.Empty
-            });
-        }
+                var provider = GetProvider(providerId);
+                if (!await provider.IsConnectedAsync(cancellationToken))
+                {
+                    return await StoreFailureAsync(provider, "Upload", "Connect to Dropbox before uploading.", cancellationToken);
+                }
 
-        var result = await provider.UploadAsync(files, cancellationToken);
-        await UpdateMetadataAfterOperationAsync(provider, result, isUpload: result.IsSuccess, isDownload: false, cancellationToken);
-        return result;
+                var files = new List<SyncFilePayload>(SyncFiles.Count);
+                foreach (var descriptor in SyncFiles)
+                {
+                    var json = await _localStorageService.LoadJsonAsync(descriptor.LocalStorageKey);
+                    files.Add(new SyncFilePayload
+                    {
+                        Descriptor = descriptor,
+                        Content = json ?? string.Empty
+                    });
+                }
+
+                var result = await provider.UploadAsync(files, cancellationToken);
+                await UpdateMetadataAfterOperationAsync(provider, result, isUpload: result.IsSuccess, isDownload: false, cancellationToken);
+                return result;
+            });
     }
 
     public async Task<SyncResult> DownloadAsync(string providerId, CancellationToken cancellationToken = default)
     {
         await EnsureInitializedAsync();
 
-        var provider = GetProvider(providerId);
-        if (!await provider.IsConnectedAsync(cancellationToken))
-        {
-            return await StoreFailureAsync(provider, "Download", "Connect to Dropbox before downloading.", cancellationToken);
-        }
-
-        var result = await provider.DownloadAsync(SyncFiles, cancellationToken);
-        if (!result.IsSuccess)
-        {
-            await UpdateMetadataAfterOperationAsync(provider, result, isUpload: false, isDownload: false, cancellationToken);
-            return result;
-        }
-
-        var validationError = ValidateDownloadPayload(result.Files);
-        if (!string.IsNullOrWhiteSpace(validationError))
-        {
-            return await StoreFailureAsync(provider, "Download", validationError, cancellationToken);
-        }
-
-        var originalFiles = await CaptureLocalFilesAsync();
-
-        try
-        {
-            foreach (var payload in result.Files)
+        return await ExecuteOperationAsync(
+            "Download",
+            async () =>
             {
-                await _localStorageService.SaveJsonAsync(payload.Descriptor.LocalStorageKey, payload.Content);
-            }
+                var provider = GetProvider(providerId);
+                if (!await provider.IsConnectedAsync(cancellationToken))
+                {
+                    return await StoreFailureAsync(provider, "Download", "Connect to Dropbox before downloading.", cancellationToken);
+                }
 
-            await _applicationState.ReloadFromStorageAsync();
-            await _applicationLogService.ReloadAsync();
-            await _localizationService.ReloadAsync();
+                var result = await provider.DownloadAsync(SyncFiles, cancellationToken);
+                if (!result.IsSuccess)
+                {
+                    await UpdateMetadataAfterOperationAsync(provider, result, isUpload: false, isDownload: false, cancellationToken);
+                    return result;
+                }
 
-            var success = CreateResult(true, "Download", $"Downloaded {result.Files.Count} file(s) from Dropbox and restored local data.");
-            await UpdateMetadataAfterOperationAsync(provider, success, isUpload: false, isDownload: true, cancellationToken);
-            return success;
-        }
-        catch (Exception exception)
-        {
-            foreach (var originalFile in originalFiles)
-            {
-                await _localStorageService.SaveJsonAsync(originalFile.Key, originalFile.Value);
-            }
+                var validationError = ValidateDownloadPayload(result.Files);
+                if (!string.IsNullOrWhiteSpace(validationError))
+                {
+                    return await StoreFailureAsync(provider, "Download", validationError, cancellationToken);
+                }
 
-            await _applicationState.ReloadFromStorageAsync();
-            await _applicationLogService.ReloadAsync();
-            await _localizationService.ReloadAsync();
+                var originalFiles = await CaptureLocalFilesAsync();
 
-            return await StoreFailureAsync(
-                provider,
-                "Download",
-                $"Download completed, but restoring local data failed. The previous local state was restored. {exception.Message}",
-                cancellationToken);
-        }
+                try
+                {
+                    foreach (var payload in result.Files)
+                    {
+                        await _localStorageService.SaveJsonAsync(payload.Descriptor.LocalStorageKey, payload.Content);
+                    }
+
+                    await _applicationState.ReloadFromStorageAsync();
+                    await _applicationLogService.ReloadAsync();
+                    await _localizationService.ReloadAsync();
+
+                    var success = CreateResult(true, "Download", $"Downloaded {result.Files.Count} file(s) from Dropbox and restored local data.");
+                    await UpdateMetadataAfterOperationAsync(provider, success, isUpload: false, isDownload: true, cancellationToken);
+                    return success;
+                }
+                catch (Exception exception)
+                {
+                    foreach (var originalFile in originalFiles)
+                    {
+                        await _localStorageService.SaveJsonAsync(originalFile.Key, originalFile.Value);
+                    }
+
+                    await _applicationState.ReloadFromStorageAsync();
+                    await _applicationLogService.ReloadAsync();
+                    await _localizationService.ReloadAsync();
+
+                    return await StoreFailureAsync(
+                        provider,
+                        "Download",
+                        $"Download completed, but restoring local data failed. The previous local state was restored. {exception.Message}",
+                        cancellationToken);
+                }
+            });
     }
 
     private async Task EnsureInitializedAsync()
@@ -190,6 +207,24 @@ public sealed class ManualSyncService
         if (!_isInitialized)
         {
             await InitializeAsync();
+        }
+    }
+
+    private async Task<SyncResult> ExecuteOperationAsync(string operation, Func<Task<SyncResult>> action)
+    {
+        IsBusy = true;
+        ActiveOperation = operation;
+        Changed?.Invoke();
+
+        try
+        {
+            return await action();
+        }
+        finally
+        {
+            IsBusy = false;
+            ActiveOperation = null;
+            Changed?.Invoke();
         }
     }
 

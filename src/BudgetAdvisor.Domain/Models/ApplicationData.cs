@@ -12,6 +12,8 @@ public sealed class ApplicationData
     public string ThemeMode { get; set; } = AppThemeNames.Standard;
     public int UpcomingExpensesMonths { get; set; } = 3;
     public decimal? UpcomingExpensesMinimumAmount { get; set; }
+    public DateOnly? LatestImportedExpenseDate { get; set; }
+    public List<ImportedExpenseCategorySuggestion> ImportedExpenseCategorySuggestions { get; set; } = [];
 
     public List<HouseholdMember> Members { get; set; } = [];
 

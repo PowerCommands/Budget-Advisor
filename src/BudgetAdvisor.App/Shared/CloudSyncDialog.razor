@@ -14,17 +14,25 @@
             <MudText Typo="Typo.body2"><strong>@Localizer["sync.connectedAccount"]:</strong> @ConnectedAccountName</MudText>
             <MudText Typo="Typo.body2"><strong>@Localizer["sync.lastUpload"]:</strong> @LastUploadText</MudText>
             <MudText Typo="Typo.body2"><strong>@Localizer["sync.lastDownload"]:</strong> @LastDownloadText</MudText>
+
+            @if (IsBusy)
+            {
+                <div class="cloud-sync-progress">
+                    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Rounded="true" />
+                    <MudText Typo="Typo.body2">@ProgressText</MudText>
+                </div>
+            }
         </MudStack>
     </DialogContent>
     <DialogActions>
         <MudTooltip Text="@Localizer["action.cancel"]">
-            <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="Cancel" aria-label="@Localizer["action.cancel"]" />
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" Disabled="@IsBusy" OnClick="Cancel" aria-label="@Localizer["action.cancel"]" />
         </MudTooltip>
         <MudTooltip Text="@Localizer["sync.download"]">
-            <MudIconButton Icon="@Icons.Material.Filled.CloudDownload" Color="Color.Secondary" OnClick="Download" aria-label="@Localizer["sync.download"]" />
+            <MudIconButton Icon="@Icons.Material.Filled.CloudDownload" Color="Color.Secondary" Disabled="@IsBusy" OnClick="Download" aria-label="@Localizer["sync.download"]" />
         </MudTooltip>
         <MudTooltip Text="@Localizer["sync.upload"]">
-            <MudIconButton Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" OnClick="Upload" aria-label="@Localizer["sync.upload"]" />
+            <MudIconButton Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" Disabled="@IsBusy" OnClick="Upload" aria-label="@Localizer["sync.upload"]" />
         </MudTooltip>
     </DialogActions>
 </MudDialog>
@@ -44,6 +52,12 @@
 
     [Parameter]
     public string LastDownloadText { get; set; } = "Never";
+
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    [Parameter]
+    public string ProgressText { get; set; } = string.Empty;
 
     private void Upload() => MudDialog.Close(DialogResult.Ok("upload"));
 

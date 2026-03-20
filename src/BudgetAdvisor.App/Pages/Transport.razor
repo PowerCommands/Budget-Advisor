@@ -101,6 +101,11 @@
                         <ValidationMessage For="() => definitionForm.Amount" />
                     </div>
                     <div>
+                        <label class="form-label">@Localizer["field.intervalMonths"]</label>
+                        <InputNumber class="form-control" @bind-Value="definitionForm.IntervalMonths" />
+                        <ValidationMessage For="() => definitionForm.IntervalMonths" />
+                    </div>
+                    <div>
                         <label class="form-label">@Localizer["field.start"]</label>
                         <InputDate class="form-control" @bind-Value="definitionForm.StartDate" />
                         <ValidationMessage For="() => definitionForm.StartDate" />
@@ -109,11 +114,6 @@
                         <label class="form-label">@Localizer["field.end"]</label>
                         <InputDate class="form-control" @bind-Value="definitionForm.EndDate" />
                         <ValidationMessage For="() => definitionForm.EndDate" />
-                    </div>
-                    <div>
-                        <label class="form-label">@Localizer["field.intervalMonths"]</label>
-                        <InputNumber class="form-control" @bind-Value="definitionForm.IntervalMonths" />
-                        <ValidationMessage For="() => definitionForm.IntervalMonths" />
                     </div>
                 </div>
                 <button class="btn btn-primary" type="submit">@Localizer["action.addTransportDefinition"]</button>
@@ -227,6 +227,13 @@
         }
         else
         {
+            <section class="card-panel mt-4">
+                <div class="stats-grid">
+                    <div class="stat-card"><span>@Localizer["transport.currentAmortization"]</span><strong>@AppState.FormatCurrency(TotalTransportLoanAmortization)</strong></div>
+                    <div class="stat-card"><span>@Localizer["transport.remainingDebt"]</span><strong>@AppState.FormatCurrency(TotalTransportLoanRemainingDebt)</strong></div>
+                </div>
+            </section>
+
             <section class="card-panel mt-4">
                 <div class="table-responsive">
                     <table class="table app-table compact-overview-table">
@@ -660,6 +667,8 @@
             .OrderBy(loan => loan.Lender)
             .ThenBy(loan => loan.LoanStartDate)
             .ToList();
+    private decimal TotalTransportLoanAmortization => TransportLoans.Sum(GetActiveAmortizationAmount);
+    private decimal TotalTransportLoanRemainingDebt => TransportLoans.Sum(loan => AppState.GetLoanCurrentBalance(loan.Id));
 
     private bool IsLoanExpanded(Guid loanId) => expandedLoanIds.Contains(loanId);
 
@@ -1189,6 +1198,12 @@
     {
         var activePeriod = GetActiveLoanInterestBindingPeriod(loanId);
         return activePeriod is null ? "-" : AppState.FormatCurrency(activePeriod.MonthlyAmortization);
+    }
+
+    private decimal GetActiveAmortizationAmount(TransportLoan loan)
+    {
+        var activePeriod = GetActiveLoanInterestBindingPeriod(loan.Id);
+        return activePeriod?.MonthlyAmortization ?? loan.CurrentAmortization;
     }
 
     private decimal GetSuggestedBackfillAmortizationAmount(Guid loanId)

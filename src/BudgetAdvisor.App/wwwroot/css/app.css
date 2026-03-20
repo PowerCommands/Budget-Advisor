@@ -272,6 +272,28 @@ a, .btn-link {
     flex: 0 0 auto;
 }
 
+.cloud-sync-progress {
+    display: grid;
+    gap: 0.5rem;
+    padding: 0.75rem 0.9rem;
+    border-radius: 0.9rem;
+    background: color-mix(in srgb, var(--mud-palette-primary) 8%, var(--mud-palette-surface));
+    border: 1px solid color-mix(in srgb, var(--mud-palette-primary) 24%, var(--mud-palette-lines-default));
+}
+
+.cloud-sync-floating-progress {
+    position: fixed;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    z-index: 1400;
+    width: min(24rem, calc(100vw - 2rem));
+}
+
+.cloud-sync-floating-progress-shell {
+    padding: 0.9rem 1rem;
+    border-radius: 1rem;
+}
+
 .mud-upload-label {
     display: inline-flex;
 }

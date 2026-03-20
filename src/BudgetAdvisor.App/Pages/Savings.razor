@@ -191,7 +191,7 @@
         }
         else
         {
-            <section class="card-panel mt-4">
+            <section class="card-panel">
                 <div class="table-responsive">
                     <table class="table app-table compact-overview-table">
                         <thead>
@@ -332,6 +332,13 @@
                                     </tr>
                                 }
                             }
+
+                            <tr class="table-summary-row">
+                                <td colspan="5" class="table-summary-label">@Localizer["table.sum"]</td>
+                                <td class="table-summary-value">@AppState.FormatCurrency(GetTotalSavingsBalance(accountType))</td>
+                                <td></td>
+                                <td></td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -345,6 +352,9 @@
             .OrderBy(account => account.AccountName)
             .ThenBy(account => account.ProviderName)
             .ToList();
+
+    private decimal GetTotalSavingsBalance(SavingsAccountType accountType) =>
+        GetAccounts(accountType).Sum(account => AppState.GetSavingsAccountCurrentBalance(account.Id));
 
     private IReadOnlyList<SavingsReturnPeriod> GetPeriods(Guid accountId) =>
         AppState.Data.SavingsReturnPeriods

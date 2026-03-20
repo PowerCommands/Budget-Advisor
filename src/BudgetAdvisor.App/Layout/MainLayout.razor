@@ -95,6 +95,18 @@
     </main>
 </div>
 
+@if (SyncService.IsBusy)
+{
+    <div class="cloud-sync-floating-progress">
+        <MudPaper Elevation="6" Class="cloud-sync-floating-progress-shell">
+            <MudStack Spacing="1">
+                <MudText Typo="Typo.body1">@GetSyncProgressText()</MudText>
+                <MudProgressLinear Color="Color.Primary" Indeterminate="true" Rounded="true" />
+            </MudStack>
+        </MudPaper>
+    </div>
+}
+
 @code {
     protected override async Task OnInitializedAsync()
     {
@@ -128,7 +140,9 @@
         {
             { dialog => dialog.ConnectedAccountName, GetConnectedAccountText() },
             { dialog => dialog.LastUploadText, FormatSyncTimestamp(SyncService.Metadata.LastUploadUtc) },
-            { dialog => dialog.LastDownloadText, FormatSyncTimestamp(SyncService.Metadata.LastDownloadUtc) }
+            { dialog => dialog.LastDownloadText, FormatSyncTimestamp(SyncService.Metadata.LastDownloadUtc) },
+            { dialog => dialog.IsBusy, SyncService.IsBusy },
+            { dialog => dialog.ProgressText, GetSyncProgressText() }
         };
 
         var dialog = await DialogService.ShowAsync<CloudSyncDialog>(Localizer["sync.provider.dropbox"], parameters);
@@ -228,6 +242,14 @@
         timestampUtc.HasValue
             ? timestampUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
             : Localizer["sync.never"];
+
+    private string GetSyncProgressText() => SyncService.ActiveOperation switch
+    {
+        "Connect" => Localizer["sync.progress.connect"],
+        "Upload" => Localizer["sync.progress.upload"],
+        "Download" => Localizer["sync.progress.download"],
+        _ => Localizer["sync.progress.default"]
+    };
 
     private int GetCurrentTabIndex()
     {

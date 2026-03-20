@@ -1,5 +1,6 @@
 @inject ApplicationState AppState
 @inject LocalizationService Localizer
+@inject LocalStorageService LocalStorage
 
 <section class="card-panel mt-4">
     @if (ShowTitle || ShowAllCostsToggle)
@@ -31,17 +32,27 @@
                 <option value="">@Localizer["filter.allCategories"]</option>
                 @foreach (var option in CategoryOptions)
                 {
-                    <option value="@option.Value">@GetCategoryOptionLabel(option)</option>
+                    <option value="@option.Value">@Localizer[$"expenseCategory.{option.Category}"]</option>
+                }
+            </InputSelect>
+        </div>
+        <div>
+            <label class="form-label">@Localizer["field.subcategory"]</label>
+            <InputSelect class="form-select" @bind-Value="filter.SubcategoryFilter">
+                <option value="">@Localizer["filter.allSubcategories"]</option>
+                @foreach (var option in SubcategoryOptions)
+                {
+                    <option value="@option">@option</option>
                 }
             </InputSelect>
         </div>
         <div>
             <label class="form-label">@Localizer["filter.startDate"]</label>
-            <InputDate class="form-control" @bind-Value="filter.StartDate" />
+            <InputDate class="form-control" @bind-Value="filter.StartDate" @bind-Value:after="PersistDateFiltersAsync" />
         </div>
         <div>
             <label class="form-label">@Localizer["filter.endDate"]</label>
-            <InputDate class="form-control" @bind-Value="filter.EndDate" />
+            <InputDate class="form-control" @bind-Value="filter.EndDate" @bind-Value:after="PersistDateFiltersAsync" />
         </div>
     </div>
 
@@ -105,6 +116,8 @@
     private readonly ExpenseTableFilter filter = new();
     private ExpenseQueryScope lastResolvedScope;
     private bool defaultDateRangeApplied;
+    private bool pendingDateFilterLoad = true;
+    private string currentDateFilterStorageKey = string.Empty;
 
     [Parameter]
     public ExpenseQueryScope Scope { get; set; }
@@ -134,6 +147,7 @@
     private decimal FilteredTotal => FilteredEntries.Sum(entry => entry.Amount);
 
     private IReadOnlyList<ExpenseFilterCategoryOption> CategoryOptions => AppState.GetExpenseFilterCategoryOptions(filter);
+    private IReadOnlyList<string> SubcategoryOptions => AppState.GetExpenseFilterSubcategoryOptions(filter);
 
     protected override void OnParametersSet()
     {
@@ -141,16 +155,36 @@
         if (resolvedScope != lastResolvedScope)
         {
             filter.CategoryFilter = string.Empty;
+            filter.SubcategoryFilter = string.Empty;
             lastResolvedScope = resolvedScope;
         }
 
         filter.Scope = resolvedScope;
+        var dateFilterStorageKey = GetDateFilterStorageKey(resolvedScope);
+        if (!string.Equals(dateFilterStorageKey, currentDateFilterStorageKey, StringComparison.Ordinal))
+        {
+            currentDateFilterStorageKey = dateFilterStorageKey;
+            pendingDateFilterLoad = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!pendingDateFilterLoad)
+        {
+            return;
+        }
+
+        pendingDateFilterLoad = false;
+        await LoadPersistedDateFiltersAsync();
         ApplyDefaultDateRange();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task HandleIncludeAllCostsChanged(bool includeAllCosts)
     {
         filter.CategoryFilter = string.Empty;
+        filter.SubcategoryFilter = string.Empty;
         await IncludeAllCostsChanged.InvokeAsync(includeAllCosts);
     }
 
@@ -173,21 +207,37 @@
         defaultDateRangeApplied = true;
     }
 
-    private bool UsesSubcategoryOnly => filter.Scope is ExpenseQueryScope.Housing or ExpenseQueryScope.Transport or ExpenseQueryScope.Credits or ExpenseQueryScope.Savings or ExpenseQueryScope.Assets;
+    private async Task LoadPersistedDateFiltersAsync()
+    {
+        var persistedFilter = await LocalStorage.LoadAsync<PersistedExpenseDateFilter>(currentDateFilterStorageKey);
+        filter.StartDate = persistedFilter?.StartDate;
+        filter.EndDate = persistedFilter?.EndDate;
+        defaultDateRangeApplied = filter.StartDate.HasValue || filter.EndDate.HasValue;
+    }
 
-    private string GetCategoryOptionLabel(ExpenseFilterCategoryOption option) =>
-        UsesSubcategoryOnly
-            ? option.Subcategory
-            : $"{Localizer[$"expenseCategory.{option.Category}"]} / {option.Subcategory}";
+    private async Task PersistDateFiltersAsync()
+    {
+        await LocalStorage.SaveAsync(currentDateFilterStorageKey, new PersistedExpenseDateFilter
+        {
+            StartDate = filter.StartDate,
+            EndDate = filter.EndDate
+        });
+    }
+
+    private static string GetDateFilterStorageKey(ExpenseQueryScope scope) => $"budget-advisor.expense-records.date-filter.{scope}";
 
     private string GetEntryName(ExpenseEntry entry) => AppState.GetExpenseDescriptionDisplay(entry);
 
-    private string GetEntryCategoryLabel(ExpenseEntry entry) =>
-        UsesSubcategoryOnly
-            ? AppState.GetExpenseSubcategoryDisplay(entry)
-            : $"{Localizer[$"expenseCategory.{entry.Category}"]} / {AppState.GetExpenseSubcategoryDisplay(entry)}";
+    private string GetEntryCategoryLabel(ExpenseEntry entry) => $"{Localizer[$"expenseCategory.{entry.Category}"]} / {AppState.GetExpenseSubcategoryDisplay(entry)}";
 
     private static string FormatPeriod(ExpenseEntry entry) => $"{entry.Year:0000}/{entry.Month:00}";
 
     private int GetColumnCount() => OnDelete.HasDelegate ? 5 : 4;
+
+    private sealed class PersistedExpenseDateFilter
+    {
+        public DateOnly? StartDate { get; set; }
+
+        public DateOnly? EndDate { get; set; }
+    }
 }

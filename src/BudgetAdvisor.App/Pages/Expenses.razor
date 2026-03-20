@@ -27,6 +27,15 @@
                         <ValidationMessage For="() => oneTimeExpenseForm.Description" />
                     </div>
                     <div>
+                        <label class="form-label">@Localizer["field.category"]</label>
+                        <InputSelect class="form-select" @bind-Value="oneTimeExpenseForm.Category">
+                            @foreach (var category in ExpenseCategories)
+                            {
+                                <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div>
                         <label class="form-label">@Localizer["field.subcategory"]</label>
                         <InputText class="form-control" @bind-Value="oneTimeExpenseForm.Subcategory" list="one-time-subcategories" />
                         <datalist id="one-time-subcategories">
@@ -46,15 +55,6 @@
                         <InputDate class="form-control" @bind-Value="oneTimeExpenseForm.Date" />
                         <ValidationMessage For="() => oneTimeExpenseForm.Date" />
                     </div>
-                    <div>
-                        <label class="form-label">@Localizer["field.category"]</label>
-                        <InputSelect class="form-select" @bind-Value="oneTimeExpenseForm.Category">
-                            @foreach (var category in ExpenseCategories)
-                            {
-                                <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
-                            }
-                        </InputSelect>
-                    </div>
                 </div>
                 <button class="btn btn-primary" type="submit">@Localizer["action.addExpense"]</button>
             </EditForm>
@@ -72,6 +72,15 @@
                         <label class="form-label">@Localizer["field.description"]</label>
                         <InputText class="form-control" @bind-Value="subscriptionForm.Name" />
                         <ValidationMessage For="() => subscriptionForm.Name" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.category"]</label>
+                        <InputSelect class="form-select" @bind-Value="subscriptionForm.Category">
+                            @foreach (var category in ExpenseCategories)
+                            {
+                                <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
+                            }
+                        </InputSelect>
                     </div>
                     <div>
                         <label class="form-label">@Localizer["field.subcategory"]</label>
@@ -102,15 +111,6 @@
                         <label class="form-label">@Localizer["field.end"]</label>
                         <InputDate class="form-control" @bind-Value="subscriptionForm.EndDate" />
                         <ValidationMessage For="() => subscriptionForm.EndDate" />
-                    </div>
-                    <div>
-                        <label class="form-label">@Localizer["field.category"]</label>
-                        <InputSelect class="form-select" @bind-Value="subscriptionForm.Category">
-                            @foreach (var category in ExpenseCategories)
-                            {
-                                <option value="@category">@Localizer[$"expenseCategory.{category}"]</option>
-                            }
-                        </InputSelect>
                     </div>
                 </div>
                 <button class="btn btn-primary" type="submit">@Localizer["action.addSubscription"]</button>
@@ -332,7 +332,6 @@
         .GetValues<ExpenseCategory>()
         .Where(category =>
             category != ExpenseCategory.Housing &&
-            category != ExpenseCategory.Transport &&
             category != ExpenseCategory.Credits &&
             category != ExpenseCategory.Savings &&
             category != ExpenseCategory.Assets)
@@ -378,7 +377,7 @@
 
             var options = new DialogOptions
             {
-                MaxWidth = MaxWidth.ExtraLarge,
+                MaxWidth = MaxWidth.False,
                 FullWidth = true
             };
 

@@ -10,6 +10,8 @@ public sealed class ExpenseTableFilter
 
     public string CategoryFilter { get; set; } = string.Empty;
 
+    public string SubcategoryFilter { get; set; } = string.Empty;
+
     public DateOnly? StartDate { get; set; }
 
     public DateOnly? EndDate { get; set; }

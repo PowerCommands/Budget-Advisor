@@ -61,7 +61,7 @@ public sealed class ApplicationState
     {
         ArgumentNullException.ThrowIfNull(filter);
 
-        return ApplyExpenseTableFilter(GetScopedExpenseEntries(filter.Scope), filter, includeCategoryFilter: true)
+        return ApplyExpenseTableFilter(GetScopedExpenseEntries(filter.Scope), filter, includeCategoryFilter: true, includeSubcategoryFilter: true)
             .OrderByDescending(entry => entry.Year)
             .ThenByDescending(entry => entry.Month)
             .ThenBy(entry => entry.Category)
@@ -74,21 +74,26 @@ public sealed class ApplicationState
     {
         ArgumentNullException.ThrowIfNull(filter);
 
-        var subcategoryOnly = ScopeUsesSubcategoryFilterOnly(filter.Scope);
-
-        return ApplyExpenseTableFilter(GetScopedExpenseEntries(filter.Scope), filter, includeCategoryFilter: false)
+        return ApplyExpenseTableFilter(GetScopedExpenseEntries(filter.Scope), filter, includeCategoryFilter: false, includeSubcategoryFilter: true)
             .Select(entry => new ExpenseFilterCategoryOption
             {
-                Value = subcategoryOnly
-                    ? entry.Subcategory.Trim()
-                    : BuildCombinedCategoryFilterValue(entry.Category, entry.Subcategory),
-                Category = entry.Category,
-                Subcategory = entry.Subcategory.Trim()
+                Value = entry.Category.ToString(),
+                Category = entry.Category
             })
-            .Where(option => !string.IsNullOrWhiteSpace(option.Subcategory))
-            .DistinctBy(option => option.Value)
+            .DistinctBy(option => option.Category)
             .OrderBy(option => option.Category)
-            .ThenBy(option => option.Subcategory)
+            .ToList();
+    }
+
+    public IReadOnlyList<string> GetExpenseFilterSubcategoryOptions(ExpenseTableFilter filter)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        return ApplyExpenseTableFilter(GetScopedExpenseEntries(filter.Scope), filter, includeCategoryFilter: true, includeSubcategoryFilter: false)
+            .Select(entry => entry.Subcategory.Trim())
+            .Where(subcategory => !string.IsNullOrWhiteSpace(subcategory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(subcategory => subcategory, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
     }
 
@@ -1969,6 +1974,63 @@ public sealed class ApplicationState
         await PersistAndNotifyAsync();
     }
 
+    public async Task SetLatestImportedExpenseDateAsync(DateOnly latestImportedExpenseDate)
+    {
+        if (Data.LatestImportedExpenseDate.HasValue && Data.LatestImportedExpenseDate.Value >= latestImportedExpenseDate)
+        {
+            return;
+        }
+
+        Data.LatestImportedExpenseDate = latestImportedExpenseDate;
+        await PersistAndNotifyAsync();
+    }
+
+    public async Task SaveImportedExpenseCategorySuggestionsAsync(IEnumerable<ImportedExpenseCategorySuggestion> suggestions)
+    {
+        ArgumentNullException.ThrowIfNull(suggestions);
+
+        var mergedSuggestions = Data.ImportedExpenseCategorySuggestions
+            .Concat(suggestions)
+            .Where(suggestion =>
+                !string.IsNullOrWhiteSpace(suggestion.Description) &&
+                !string.IsNullOrWhiteSpace(suggestion.Subcategory))
+            .Select(suggestion => new ImportedExpenseCategorySuggestion
+            {
+                Description = suggestion.Description.Trim(),
+                Category = suggestion.Category,
+                Subcategory = suggestion.Subcategory.Trim()
+            })
+            .DistinctBy(suggestion => new
+            {
+                Description = suggestion.Description,
+                suggestion.Category,
+                Subcategory = suggestion.Subcategory
+            })
+            .OrderBy(suggestion => suggestion.Description, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(suggestion => suggestion.Category)
+            .ThenBy(suggestion => suggestion.Subcategory, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (mergedSuggestions.SequenceEqual(Data.ImportedExpenseCategorySuggestions, ImportedExpenseCategorySuggestionComparer.Instance))
+        {
+            return;
+        }
+
+        Data.ImportedExpenseCategorySuggestions = mergedSuggestions;
+        await PersistAndNotifyAsync();
+    }
+
+    public async Task ClearImportedExpenseCategorySuggestionsAsync()
+    {
+        if (Data.ImportedExpenseCategorySuggestions.Count == 0)
+        {
+            return;
+        }
+
+        Data.ImportedExpenseCategorySuggestions.Clear();
+        await PersistAndNotifyAsync();
+    }
+
     public async Task<DataPruningSummary> PruneDataAsync(DateOnly cutoffDate)
     {
         var summary = _dataPruningService.Prune(Data, cutoffDate);
@@ -2418,6 +2480,7 @@ public sealed class ApplicationState
         Data.IncomeRecords ??= [];
         Data.SalaryIncomePeriods ??= [];
         Data.SubcategoryDefinitions ??= [];
+        Data.ImportedExpenseCategorySuggestions ??= [];
         Data.ExpenseRecords ??= [];
         Data.Subscriptions ??= [];
         Data.HousingDefinitions ??= [];
@@ -2509,6 +2572,7 @@ public sealed class ApplicationState
         }
 
         NormalizeSubcategoryDefinitions();
+        NormalizeImportedExpenseCategorySuggestions();
         NormalizeClosedMonths();
 
         foreach (var asset in Data.Assets)
@@ -2878,7 +2942,7 @@ public sealed class ApplicationState
             _ => Data.ExpenseRecords
         };
 
-    private IEnumerable<ExpenseEntry> ApplyExpenseTableFilter(IEnumerable<ExpenseEntry> source, ExpenseTableFilter filter, bool includeCategoryFilter)
+    private IEnumerable<ExpenseEntry> ApplyExpenseTableFilter(IEnumerable<ExpenseEntry> source, ExpenseTableFilter filter, bool includeCategoryFilter, bool includeSubcategoryFilter)
     {
         var query = source;
 
@@ -2909,19 +2973,22 @@ public sealed class ApplicationState
             query = query.Where(entry => NormalizeMonth(new DateOnly(entry.Year, entry.Month, 1)) <= normalizedEnd.Value);
         }
 
-        if (!includeCategoryFilter || string.IsNullOrWhiteSpace(filter.CategoryFilter))
+        if (includeCategoryFilter && !string.IsNullOrWhiteSpace(filter.CategoryFilter))
         {
-            return query;
+            var categoryFilter = filter.CategoryFilter.Trim();
+            if (Enum.TryParse<ExpenseCategory>(categoryFilter, ignoreCase: true, out var parsedCategory))
+            {
+                query = query.Where(entry => entry.Category == parsedCategory);
+            }
         }
 
-        var categoryFilter = filter.CategoryFilter.Trim();
+        if (includeSubcategoryFilter && !string.IsNullOrWhiteSpace(filter.SubcategoryFilter))
+        {
+            var subcategoryFilter = filter.SubcategoryFilter.Trim();
+            query = query.Where(entry => string.Equals(entry.Subcategory.Trim(), subcategoryFilter, StringComparison.OrdinalIgnoreCase));
+        }
 
-        return ScopeUsesSubcategoryFilterOnly(filter.Scope)
-            ? query.Where(entry => string.Equals(entry.Subcategory.Trim(), categoryFilter, StringComparison.OrdinalIgnoreCase))
-            : query.Where(entry => string.Equals(
-                BuildCombinedCategoryFilterValue(entry.Category, entry.Subcategory),
-                categoryFilter,
-                StringComparison.OrdinalIgnoreCase));
+        return query;
     }
 
     private static IEnumerable<MonthKey> EnumerateMonths(int startYear, int startMonth, int endYear, int endMonth)
@@ -3637,6 +3704,8 @@ public sealed class ApplicationState
         new() { Key = "subcategory.food.delivery", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Hemkörning", EnglishName = "Delivery" },
         new() { Key = "subcategory.food.restaurant", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Restaurang", EnglishName = "Restaurant" },
         new() { Key = "subcategory.food.lunch", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Lunch", EnglishName = "Lunch" },
+        new() { Key = "subcategory.food.breakfast", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Frukost", EnglishName = "Breakfast" },
+        new() { Key = "subcategory.food.coffee_break", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Fika", EnglishName = "Coffee break" },
         new() { Key = "subcategory.housing.rent", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Hyra", EnglishName = "Rent" },
         new() { Key = "subcategory.housing.monthly_fee", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Månadsavgift", EnglishName = "Monthly fee" },
         new() { Key = "subcategory.housing.electricity", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "El", EnglishName = "Electricity" },
@@ -3667,16 +3736,25 @@ public sealed class ApplicationState
         new() { Key = "subcategory.clothing.everyday_clothes", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Vardagskläder", EnglishName = "Everyday clothes" },
         new() { Key = "subcategory.clothing.shoes", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Skor", EnglishName = "Shoes" },
         new() { Key = "subcategory.clothing.jacket", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Jacka", EnglishName = "Jacket" },
+        new() { Key = "subcategory.clothing.shirt_sweater", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Tröja/Skjorta", EnglishName = "Sweater/Shirt" },
         new() { Key = "subcategory.clothing.trousers", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Byxa", EnglishName = "Trousers" },
         new() { Key = "subcategory.clothing.underwear", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Underkläder", EnglishName = "Underwear" },
         new() { Key = "subcategory.clothing.childrens_clothes", MainCategory = SubcategoryMainCategory.Clothing, SwedishName = "Barnkläder", EnglishName = "Children's clothes" },
         new() { Key = "subcategory.other.charity", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Välgörenhet", EnglishName = "Charity" },
         new() { Key = "subcategory.other.cloud_services", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Molntjänster", EnglishName = "Cloud services" },
-        new() { Key = "subcategory.other.streaming", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Streaming", EnglishName = "Streaming" },
+        new() { Key = "subcategory.other.home", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Hemmet", EnglishName = "Home" },
+        new() { Key = "subcategory.other.insurance", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Försäkring", EnglishName = "Insurance" },
+        new() { Key = "subcategory.other.hobby", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Hobby", EnglishName = "Hobby" },
+        new() { Key = "subcategory.other.tv_mobile_telephony", MainCategory = SubcategoryMainCategory.Other, SwedishName = "TV och mobiltelefoni", EnglishName = "TV and mobile telephony" },
+        new() { Key = "subcategory.other.pets", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Husdjur", EnglishName = "Pets" },
+        new() { Key = "subcategory.other.self_care", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Egenvård", EnglishName = "Self care" },
+        new() { Key = "subcategory.other.betting", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Tips, hästar och vadslagning", EnglishName = "Betting, horse racing and wagering" },
+        new() { Key = "subcategory.other.soda_snacks_candy", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Läsk, snacks och godis", EnglishName = "Soft drinks, snacks and candy" },
         new() { Key = "subcategory.other.healthcare", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Hälsa och vård", EnglishName = "Health and care" },
         new() { Key = "subcategory.other.computers_accessories", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Dator och tillbehör", EnglishName = "Computer and accessories" },
         new() { Key = "subcategory.other.audio_video", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Ljud och Bild", EnglishName = "Audio and video" },
         new() { Key = "subcategory.other.education", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Utbildning", EnglishName = "Education" },
+        new() { Key = "subcategory.other.gifts", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Present", EnglishName = "Gift" },
         new() { Key = "subcategory.other.travel", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Resor", EnglishName = "Travel" },
         new() { Key = "subcategory.other.entertainment", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Nöjen", EnglishName = "Entertainment" },
         new() { Key = "subcategory.other.unspecified", MainCategory = SubcategoryMainCategory.Other, SwedishName = "Ospecificerat", EnglishName = "Unspecified" }
@@ -3685,6 +3763,7 @@ public sealed class ApplicationState
     private void NormalizeSubcategoryDefinitions()
     {
         var shouldSeedDefaults = !Data.HasInitializedSubcategoryDefinitions && Data.SubcategoryDefinitions.Count == 0;
+        var defaultDefinitions = GetDefaultSubcategoryDefinitions();
 
         var definitions = Data.SubcategoryDefinitions
             .Where(definition => definition.MainCategory != 0)
@@ -3703,7 +3782,17 @@ public sealed class ApplicationState
 
         if (shouldSeedDefaults)
         {
-            foreach (var defaultDefinition in GetDefaultSubcategoryDefinitions())
+            foreach (var defaultDefinition in defaultDefinitions)
+            {
+                definitions.Add(CloneSubcategoryDefinition(defaultDefinition));
+            }
+        }
+        else
+        {
+            definitions.RemoveAll(definition => string.Equals(definition.Key, "subcategory.other.streaming", StringComparison.OrdinalIgnoreCase));
+
+            foreach (var defaultDefinition in defaultDefinitions.Where(definition =>
+                         !definitions.Any(existing => string.Equals(existing.Key, definition.Key, StringComparison.OrdinalIgnoreCase))))
             {
                 definitions.Add(CloneSubcategoryDefinition(defaultDefinition));
             }
@@ -3767,6 +3856,55 @@ public sealed class ApplicationState
         SwedishName = definition.SwedishName,
         EnglishName = definition.EnglishName
     };
+
+    private void NormalizeImportedExpenseCategorySuggestions()
+    {
+        Data.ImportedExpenseCategorySuggestions = Data.ImportedExpenseCategorySuggestions
+            .Where(suggestion =>
+                !string.IsNullOrWhiteSpace(suggestion.Description) &&
+                !string.IsNullOrWhiteSpace(suggestion.Subcategory))
+            .Select(suggestion => new ImportedExpenseCategorySuggestion
+            {
+                Description = suggestion.Description.Trim(),
+                Category = suggestion.Category,
+                Subcategory = suggestion.Subcategory.Trim()
+            })
+            .DistinctBy(suggestion => new
+            {
+                Description = suggestion.Description,
+                suggestion.Category,
+                Subcategory = suggestion.Subcategory
+            })
+            .OrderBy(suggestion => suggestion.Description, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(suggestion => suggestion.Category)
+            .ThenBy(suggestion => suggestion.Subcategory, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private sealed class ImportedExpenseCategorySuggestionComparer : IEqualityComparer<ImportedExpenseCategorySuggestion>
+    {
+        public static ImportedExpenseCategorySuggestionComparer Instance { get; } = new();
+
+        public bool Equals(ImportedExpenseCategorySuggestion? x, ImportedExpenseCategorySuggestion? y)
+        {
+            if (ReferenceEquals(x, y))
+            {
+                return true;
+            }
+
+            if (x is null || y is null)
+            {
+                return false;
+            }
+
+            return string.Equals(x.Description, y.Description, StringComparison.Ordinal) &&
+                   x.Category == y.Category &&
+                   string.Equals(x.Subcategory, y.Subcategory, StringComparison.Ordinal);
+        }
+
+        public int GetHashCode(ImportedExpenseCategorySuggestion obj) =>
+            HashCode.Combine(obj.Description, obj.Category, obj.Subcategory);
+    }
 
     private static SubcategoryMainCategory? MapExpenseCategoryToMainCategory(ExpenseCategory category) => category switch
     {
