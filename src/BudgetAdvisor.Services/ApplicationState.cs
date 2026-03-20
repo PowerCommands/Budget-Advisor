@@ -9,7 +9,7 @@ namespace BudgetAdvisor.Services;
 
 public sealed class ApplicationState
 {
-    private const string ApplicationDataKey = "budget-advisor.application-data";
+    public const string ApplicationDataKey = "budget-advisor.application-data";
     private const string SalaryIncomeType = "Salary";
     private const string TaxRefundIncomeType = "Tax refund";
     private const string InheritanceIncomeType = "Inheritance";
@@ -46,9 +46,15 @@ public sealed class ApplicationState
 
     public async Task InitializeAsync()
     {
-        Data = await _localStorageService.LoadAsync<ApplicationData>(ApplicationDataKey) ?? new ApplicationData();
-        NormalizeData();
-        _undoService.InitializeCurrentState(_localStorageService.Serialize(Data));
+        var data = await _localStorageService.LoadAsync<ApplicationData>(ApplicationDataKey) ?? new ApplicationData();
+        ApplyLoadedData(data, initializeUndoState: true);
+    }
+
+    public async Task ReloadFromStorageAsync()
+    {
+        var data = await _localStorageService.LoadAsync<ApplicationData>(ApplicationDataKey) ?? new ApplicationData();
+        ApplyLoadedData(data, initializeUndoState: true);
+        Changed?.Invoke();
     }
 
     public IReadOnlyList<ExpenseEntry> GetFilteredExpenseEntries(ExpenseTableFilter filter)
@@ -1899,8 +1905,7 @@ public sealed class ApplicationState
             throw new InvalidOperationException("The backup file is invalid.");
         }
 
-        Data = data;
-        NormalizeData();
+        ApplyLoadedData(data, initializeUndoState: false);
         await PersistAndNotifyAsync();
     }
 
@@ -2567,6 +2572,17 @@ public sealed class ApplicationState
 
         MigrateLegacyLoanBindingPeriods();
         RebuildMonthlyBalancesInMemory();
+    }
+
+    private void ApplyLoadedData(ApplicationData data, bool initializeUndoState)
+    {
+        Data = data;
+        NormalizeData();
+
+        if (initializeUndoState)
+        {
+            _undoService.InitializeCurrentState(_localStorageService.Serialize(Data));
+        }
     }
 
     public decimal GetLoanCurrentBalance(Guid loanId) => GetCurrentOrLatestBalance(loanId);

@@ -5,8 +5,8 @@ namespace BudgetAdvisor.Services;
 
 public sealed class LocalizationService
 {
-    private const string LocalizationKey = "budget-advisor.localization";
-    private const string CurrentLanguageKey = "budget-advisor.localization.current-language";
+    public const string LocalizationKey = "budget-advisor.localization";
+    public const string CurrentLanguageKey = "budget-advisor.localization.current-language";
 
     private readonly HttpClient _httpClient;
     private readonly LocalStorageService _localStorageService;
@@ -26,6 +26,12 @@ public sealed class LocalizationService
 
     public async Task InitializeAsync()
     {
+        await ReloadAsync();
+    }
+
+    public async Task ReloadAsync()
+    {
+        _resources.Clear();
         await LoadDefaultLanguageAsync("en");
         await LoadDefaultLanguageAsync("sv");
 
@@ -43,6 +49,12 @@ public sealed class LocalizationService
         {
             CurrentLanguage = storedLanguage;
         }
+        else
+        {
+            CurrentLanguage = "en";
+        }
+
+        Changed?.Invoke();
     }
 
     public string GetString(string key)

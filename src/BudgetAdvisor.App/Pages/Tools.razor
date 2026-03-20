@@ -5,6 +5,7 @@
 @inject LocalizationService Localizer
 @inject IApplicationLogService ApplicationLogService
 @inject IBrowserStorageUsageService BrowserStorageUsageService
+@inject ManualSyncService SyncService
 @inject IDialogService DialogService
 @using BudgetAdvisor.Domain.Theming
 
@@ -24,6 +25,75 @@
     <MudTabs Rounded="true" SliderColor="Color.Primary" Elevation="0">
         <MudTabPanel Text="@Localizer["settings.tab.data"]" Icon="@Icons.Material.Filled.Storage">
             <MudGrid Spacing="3" Class="mt-1">
+                <MudItem xs="12">
+                    <MudPaper Class="card-panel" Elevation="0">
+                        <MudStack Spacing="3">
+                            <div class="section-title-row">
+                                <div>
+                                    <MudText Typo="Typo.h5">@Localizer["sync.cloudStorage"]</MudText>
+                                </div>
+                            </div>
+
+                            <MudGrid Spacing="3">
+                                <MudItem xs="12" md="8">
+                                    <MudPaper Class="card-panel settings-card cloud-sync-provider-card" Elevation="0">
+                                        <MudStack Spacing="2">
+                                            <div class="cloud-sync-provider-header">
+                                                <img src="images/dropbox.png" alt="Dropbox" class="cloud-sync-provider-logo" />
+                                                <div>
+                                                    <MudText Typo="Typo.h6">@Localizer["sync.provider.dropbox"]</MudText>
+                                                    <MudText Typo="Typo.body2">
+                                                        @Localizer["sync.dropboxDescription"]
+                                                    </MudText>
+                                                </div>
+                                            </div>
+
+                                            <MudDivider />
+
+                                            <MudText Typo="Typo.body2"><strong>@Localizer["sync.connectionStatus"]:</strong> @GetConnectionStatusText()</MudText>
+                                            <MudText Typo="Typo.body2"><strong>@Localizer["sync.provider"]:</strong> @SyncService.Metadata.ProviderName</MudText>
+                                            <MudText Typo="Typo.body2"><strong>@Localizer["sync.connectedAccount"]:</strong> @GetConnectedAccountText()</MudText>
+                                            <MudText Typo="Typo.body2"><strong>@Localizer["sync.lastUpload"]:</strong> @FormatSyncTimestamp(SyncService.Metadata.LastUploadUtc)</MudText>
+                                            <MudText Typo="Typo.body2"><strong>@Localizer["sync.lastDownload"]:</strong> @FormatSyncTimestamp(SyncService.Metadata.LastDownloadUtc)</MudText>
+                                            <MudText Typo="Typo.body2"><strong>@Localizer["sync.files"]:</strong> @string.Join(", ", SyncService.Files.Select(file => file.DisplayName))</MudText>
+
+                                            <div class="button-row">
+                                                <MudTooltip Text="@Localizer["sync.connect"]">
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Link"
+                                                                   Color="Color.Primary"
+                                                                   OnClick="HandleConnectToDropboxAsync"
+                                                                   aria-label="@Localizer["sync.connect"]" />
+                                                </MudTooltip>
+                                                <MudTooltip Text="@Localizer["sync.upload"]">
+                                                    <MudIconButton Icon="@Icons.Material.Filled.CloudUpload"
+                                                                   Color="Color.Primary"
+                                                                   Disabled="@(!isDropboxConnected)"
+                                                                   OnClick="HandleUploadToDropboxAsync"
+                                                                   aria-label="@Localizer["sync.upload"]" />
+                                                </MudTooltip>
+                                                <MudTooltip Text="@Localizer["sync.download"]">
+                                                    <MudIconButton Icon="@Icons.Material.Filled.CloudDownload"
+                                                                   Color="Color.Secondary"
+                                                                   Disabled="@(!isDropboxConnected)"
+                                                                   OnClick="HandleDownloadFromDropboxAsync"
+                                                                   aria-label="@Localizer["sync.download"]" />
+                                                </MudTooltip>
+                                            </div>
+
+                                            @if (latestSyncResult is not null)
+                                            {
+                                                <MudAlert Severity="@GetSyncResultSeverity()" Variant="Variant.Outlined">
+                                                    @($"{latestSyncResult.Operation}: {latestSyncResult.Message}")
+                                                </MudAlert>
+                                            }
+                                        </MudStack>
+                                    </MudPaper>
+                                </MudItem>
+                            </MudGrid>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
                 <MudItem xs="12" md="4">
                     <MudPaper Class="card-panel settings-card" Elevation="0">
                         <MudStack Spacing="2">
@@ -350,15 +420,20 @@
     private BrowserStorageUsageSnapshot StorageUsage { get; set; } = new();
     private DateTime? pruningCutoffDate;
     private string? statusMessage;
+    private bool isDropboxConnected;
     private SubcategoryMainCategory selectedSubcategoryMainCategory = SubcategoryMainCategory.Income;
     private List<SubcategoryDefinition> editableSubcategoryDefinitions = [];
+    private SyncResult? latestSyncResult;
 
     protected override async Task OnInitializedAsync()
     {
         Localizer.Changed += HandleChanged;
         AppState.Changed += HandleChanged;
         ApplicationLogService.Changed += HandleChanged;
+        SyncService.Changed += HandleChanged;
         LoadEditableSubcategoryDefinitions();
+        await SyncService.InitializeAsync();
+        SyncUiStateFromService();
         await RefreshStorageUsageAsync();
     }
 
@@ -549,6 +624,70 @@
             summary.RecurringExpenseDefinitionsRemoved);
     }
 
+    private async Task HandleConnectToDropboxAsync()
+    {
+        var result = await SyncService.ConnectAsync(DropboxSyncProvider.ProviderIdValue, new SyncConnectionRequest());
+        latestSyncResult = result;
+        if (result.IsSuccess)
+        {
+            statusMessage = result.Message;
+        }
+
+        await SyncService.RefreshAsync();
+        SyncUiStateFromService();
+        await RefreshStorageUsageAsync();
+    }
+
+    private async Task HandleUploadToDropboxAsync()
+    {
+        var result = await SyncService.UploadAsync(DropboxSyncProvider.ProviderIdValue);
+        latestSyncResult = result;
+        if (result.IsSuccess)
+        {
+            statusMessage = result.Message;
+        }
+
+        await SyncService.RefreshAsync();
+        SyncUiStateFromService();
+        await RefreshStorageUsageAsync();
+    }
+
+    private async Task HandleDownloadFromDropboxAsync()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, "Download from Dropbox" },
+            { dialog => dialog.Message, "This will replace the current local application data and activity log with the versions stored in Dropbox." },
+            { dialog => dialog.ConfirmText, "Download" },
+            { dialog => dialog.CancelText, "Cancel" },
+            { dialog => dialog.ConfirmColor, Color.Warning }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>("Download from Dropbox", parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var dialogResult = await dialog.Result;
+        if (dialogResult?.Canceled ?? true)
+        {
+            return;
+        }
+
+        var syncResult = await SyncService.DownloadAsync(DropboxSyncProvider.ProviderIdValue);
+        latestSyncResult = syncResult;
+        if (syncResult.IsSuccess)
+        {
+            statusMessage = syncResult.Message;
+        }
+
+        await SyncService.RefreshAsync();
+        SyncUiStateFromService();
+        LoadEditableSubcategoryDefinitions();
+        await RefreshStorageUsageAsync();
+    }
+
     private string GetSubcategoryMainCategoryDisplay(SubcategoryMainCategory category) => category switch
     {
         SubcategoryMainCategory.Income => Localizer["subcategoryMainCategory.Income"],
@@ -570,6 +709,7 @@
 
     private async Task RefreshStateAsync()
     {
+        SyncUiStateFromService();
         await RefreshStorageUsageAsync();
         StateHasChanged();
     }
@@ -578,6 +718,35 @@
     {
         StorageUsage = await BrowserStorageUsageService.GetUsageAsync();
     }
+
+    private void SyncUiStateFromService()
+    {
+        isDropboxConnected = SyncService.Metadata.IsConnected;
+        latestSyncResult = latestSyncResult is null ? SyncService.Metadata.LatestResult : latestSyncResult;
+
+        if (SyncService.Metadata.LatestResult is not null &&
+            latestSyncResult?.TimestampUtc != SyncService.Metadata.LatestResult.TimestampUtc)
+        {
+            latestSyncResult = SyncService.Metadata.LatestResult;
+        }
+    }
+
+    private string GetConnectionStatusText() => isDropboxConnected ? Localizer["sync.connected"] : Localizer["sync.notConnected"];
+
+    private string GetConnectedAccountText() =>
+        string.IsNullOrWhiteSpace(SyncService.Metadata.ConnectedAccountName)
+            ? "Not available"
+            : SyncService.Metadata.ConnectedAccountName;
+
+    private string FormatSyncTimestamp(DateTimeOffset? timestampUtc) =>
+        timestampUtc.HasValue
+            ? timestampUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            : Localizer["sync.never"];
+
+    private Severity GetSyncResultSeverity() =>
+        latestSyncResult?.IsSuccess == true
+            ? Severity.Success
+            : Severity.Error;
 
     private static string GetUsedStorageColor(long usedBytes)
     {
@@ -607,5 +776,6 @@
         Localizer.Changed -= HandleChanged;
         AppState.Changed -= HandleChanged;
         ApplicationLogService.Changed -= HandleChanged;
+        SyncService.Changed -= HandleChanged;
     }
 }

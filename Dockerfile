@@ -8,6 +8,7 @@ RUN dotnet publish src/BudgetAdvisor.App/BudgetAdvisor.App.csproj -c Release -o 
 RUN mkdir -p /host && dotnet new web -n StaticHost -o /host --framework net10.0
 RUN printf '%s\n' \
     'using Microsoft.AspNetCore.StaticFiles;' \
+    'using Microsoft.Extensions.FileProviders;' \
     'var builder = WebApplication.CreateBuilder(args);' \
     'var app = builder.Build();' \
     'app.Use(async (context, next) =>' \
@@ -27,6 +28,12 @@ RUN printf '%s\n' \
     '        context.Context.Response.Headers.Pragma = "no-cache";' \
     '        context.Context.Response.Headers.Expires = "0";' \
     '    }' \
+    '});' \
+    'app.MapGet("/auth/dropbox/callback", async context =>' \
+    '{' \
+    '    var file = Path.Combine(app.Environment.WebRootPath, "auth", "dropbox", "callback", "index.html");' \
+    '    context.Response.ContentType = "text/html; charset=utf-8";' \
+    '    await context.Response.SendFileAsync(file);' \
     '});' \
     'app.MapFallbackToFile("index.html");' \
     'app.Run();' > /host/Program.cs

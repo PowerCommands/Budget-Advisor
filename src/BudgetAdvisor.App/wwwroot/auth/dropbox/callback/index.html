@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dropbox Authorization</title>
+</head>
+<body>
+    <script>
+        (function () {
+            const params = new URLSearchParams(window.location.search);
+            const state = params.get("state") || "";
+            const code = params.get("code") || "";
+            const error = params.get("error_description") || params.get("error") || "";
+            const payload = {
+                type: "budgetAdvisor.dropbox.auth",
+                state: state,
+                code: code,
+                error: error
+            };
+
+            if (state) {
+                window.localStorage.setItem(`budgetAdvisor.dropbox.auth.response.${state}`, JSON.stringify(payload));
+            }
+
+            if (window.opener) {
+                window.opener.postMessage(payload, window.location.origin);
+            }
+
+            window.setTimeout(function () {
+                window.close();
+            }, 150);
+        })();
+    </script>
+</body>
+</html>

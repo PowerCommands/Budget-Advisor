@@ -241,6 +241,37 @@ a, .btn-link {
     margin-top: auto;
 }
 
+.cloud-sync-provider-card {
+    min-height: 0;
+}
+
+.cloud-sync-provider-header {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.cloud-sync-provider-logo {
+    width: 3rem;
+    height: 3rem;
+    object-fit: contain;
+    flex: 0 0 auto;
+}
+
+.cloud-sync-dialog-header {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.cloud-sync-dialog-logo {
+    width: 3rem;
+    height: 3rem;
+    object-fit: cover;
+    border-radius: 999px;
+    flex: 0 0 auto;
+}
+
 .mud-upload-label {
     display: inline-flex;
 }

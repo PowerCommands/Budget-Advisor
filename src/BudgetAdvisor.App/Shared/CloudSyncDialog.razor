@@ -1,0 +1,53 @@
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <div class="cloud-sync-dialog-header">
+                <img src="images/dropbox.png" alt="Dropbox" class="cloud-sync-dialog-logo" />
+                <div>
+                    <MudText Typo="Typo.h6">@Localizer["sync.provider.dropbox"]</MudText>
+                    <MudText Typo="Typo.body2">@Localizer["sync.dialog.subtitle"]</MudText>
+                </div>
+            </div>
+
+            <MudDivider />
+
+            <MudText Typo="Typo.body2"><strong>@Localizer["sync.connectedAccount"]:</strong> @ConnectedAccountName</MudText>
+            <MudText Typo="Typo.body2"><strong>@Localizer["sync.lastUpload"]:</strong> @LastUploadText</MudText>
+            <MudText Typo="Typo.body2"><strong>@Localizer["sync.lastDownload"]:</strong> @LastDownloadText</MudText>
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudTooltip Text="@Localizer["action.cancel"]">
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Color="Color.Default" OnClick="Cancel" aria-label="@Localizer["action.cancel"]" />
+        </MudTooltip>
+        <MudTooltip Text="@Localizer["sync.download"]">
+            <MudIconButton Icon="@Icons.Material.Filled.CloudDownload" Color="Color.Secondary" OnClick="Download" aria-label="@Localizer["sync.download"]" />
+        </MudTooltip>
+        <MudTooltip Text="@Localizer["sync.upload"]">
+            <MudIconButton Icon="@Icons.Material.Filled.CloudUpload" Color="Color.Primary" OnClick="Upload" aria-label="@Localizer["sync.upload"]" />
+        </MudTooltip>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Inject]
+    private LocalizationService Localizer { get; set; } = default!;
+
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public string ConnectedAccountName { get; set; } = "Not available";
+
+    [Parameter]
+    public string LastUploadText { get; set; } = "Never";
+
+    [Parameter]
+    public string LastDownloadText { get; set; } = "Never";
+
+    private void Upload() => MudDialog.Close(DialogResult.Ok("upload"));
+
+    private void Download() => MudDialog.Close(DialogResult.Ok("download"));
+
+    private void Cancel() => MudDialog.Cancel();
+}

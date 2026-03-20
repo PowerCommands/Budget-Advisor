@@ -37,6 +37,21 @@
     gap: 0.6rem;
 }
 
+.sync-provider-button {
+    min-width: 0;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 999px;
+    padding: 0;
+}
+
+.sync-provider-button-image {
+    width: 2rem;
+    height: 2rem;
+    object-fit: cover;
+    border-radius: 999px;
+}
+
 .eyebrow {
     color: var(--mud-palette-text-secondary);
     font-size: 0.78rem;

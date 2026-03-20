@@ -29,6 +29,9 @@ public sealed class LocalStorageService
         return string.IsNullOrWhiteSpace(json) ? default : JsonSerializer.Deserialize<T>(json, JsonOptions);
     }
 
+    public async Task<string?> LoadJsonAsync(string key) =>
+        await _jsRuntime.InvokeAsync<string?>("budgetAdvisor.storage.load", key);
+
     public async Task<string> BackupAsync<T>(string fileName, T value)
     {
         var json = Serialize(value);

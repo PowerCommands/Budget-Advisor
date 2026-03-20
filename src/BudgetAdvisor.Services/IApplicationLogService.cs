@@ -10,6 +10,8 @@ public interface IApplicationLogService
 
     Task InitializeAsync();
 
+    Task ReloadAsync();
+
     Task AddEntryAsync(string description, string activity, string status);
 
     Task<string> ExportAsync();

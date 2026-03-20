@@ -4,7 +4,7 @@ namespace BudgetAdvisor.Services;
 
 public sealed class ApplicationLogService : IApplicationLogService
 {
-    private const string ApplicationLogKey = "budget-advisor.application-log";
+    public const string ApplicationLogKey = "budget-advisor.application-log";
 
     private readonly LocalStorageService _localStorageService;
     private readonly List<ApplicationLogEntry> _entries = [];
@@ -29,14 +29,15 @@ public sealed class ApplicationLogService : IApplicationLogService
             return;
         }
 
-        var storedEntries = await _localStorageService.LoadAsync<List<ApplicationLogEntry>>(ApplicationLogKey);
-        _entries.Clear();
-        if (storedEntries is not null)
-        {
-            _entries.AddRange(storedEntries);
-        }
-
+        await LoadEntriesAsync();
         _isInitialized = true;
+    }
+
+    public async Task ReloadAsync()
+    {
+        await LoadEntriesAsync();
+        _isInitialized = true;
+        Changed?.Invoke();
     }
 
     public async Task AddEntryAsync(string description, string activity, string status)
@@ -81,5 +82,15 @@ public sealed class ApplicationLogService : IApplicationLogService
     private async Task PersistAsync()
     {
         await _localStorageService.SaveAsync(ApplicationLogKey, _entries);
+    }
+
+    private async Task LoadEntriesAsync()
+    {
+        var storedEntries = await _localStorageService.LoadAsync<List<ApplicationLogEntry>>(ApplicationLogKey);
+        _entries.Clear();
+        if (storedEntries is not null)
+        {
+            _entries.AddRange(storedEntries);
+        }
     }
 }

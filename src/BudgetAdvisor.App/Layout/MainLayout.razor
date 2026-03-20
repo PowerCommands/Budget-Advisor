@@ -3,8 +3,11 @@
 @inject ApplicationState AppState
 @inject LocalizationService Localizer
 @inject IApplicationLogService ApplicationLogService
+@inject ManualSyncService SyncService
 @inject IUndoService UndoService
+@inject IDialogService DialogService
 @inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
 @using BudgetAdvisor.App.Theming
 @using BudgetAdvisor.Domain.Theming
 
@@ -30,6 +33,18 @@
                                        OnClick="HandleUndoAsync">
                                 @GetUndoLabel()
                             </MudButton>
+                        }
+                        @if (SyncService.Metadata.IsConnected)
+                        {
+                            <MudTooltip Text="@Localizer["sync.cloudStorage"]">
+                                <MudButton Variant="Variant.Text"
+                                           Color="Color.Default"
+                                           Class="sync-provider-button"
+                                           OnClick="HandleOpenCloudSyncAsync"
+                                           aria-label="@Localizer["sync.cloudStorage"]">
+                                    <img class="sync-provider-button-image" src="images/dropbox.png" alt="@Localizer["sync.cloudStorage"]" />
+                                </MudButton>
+                            </MudTooltip>
                         }
                     </div>
                     <div class="eyebrow">Budget Advisor - @GetCurrentSectionTitle()</div>
@@ -81,13 +96,15 @@
 </div>
 
 @code {
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         Localizer.Changed += HandleChanged;
         AppState.Changed += HandleChanged;
         ApplicationLogService.Changed += HandleChanged;
+        SyncService.Changed += HandleChanged;
         UndoService.Changed += HandleChanged;
         NavigationManager.LocationChanged += HandleLocationChanged;
+        await SyncService.InitializeAsync();
     }
 
     private async Task HandleLanguageChangedAsync(string languageCode)
@@ -101,6 +118,74 @@
     private async Task HandleUndoAsync()
     {
         await AppState.UndoLastChangeAsync();
+    }
+
+    private async Task HandleOpenCloudSyncAsync()
+    {
+        await SyncService.RefreshAsync();
+
+        var parameters = new DialogParameters<CloudSyncDialog>
+        {
+            { dialog => dialog.ConnectedAccountName, GetConnectedAccountText() },
+            { dialog => dialog.LastUploadText, FormatSyncTimestamp(SyncService.Metadata.LastUploadUtc) },
+            { dialog => dialog.LastDownloadText, FormatSyncTimestamp(SyncService.Metadata.LastDownloadUtc) }
+        };
+
+        var dialog = await DialogService.ShowAsync<CloudSyncDialog>(Localizer["sync.provider.dropbox"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        var action = result.Data?.ToString();
+        if (string.Equals(action, "upload", StringComparison.OrdinalIgnoreCase))
+        {
+            await ShowSyncResultAsync(await SyncService.UploadAsync(DropboxSyncProvider.ProviderIdValue));
+            return;
+        }
+
+        if (string.Equals(action, "download", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleDownloadFromDialogAsync();
+        }
+    }
+
+    private async Task HandleDownloadFromDialogAsync()
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["sync.downloadConfirmTitle"] },
+            { dialog => dialog.Message, Localizer["sync.downloadConfirmMessage"] },
+            { dialog => dialog.ConfirmText, Localizer["sync.download"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Warning }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["sync.downloadConfirmTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await ShowSyncResultAsync(await SyncService.DownloadAsync(DropboxSyncProvider.ProviderIdValue));
+    }
+
+    private async Task ShowSyncResultAsync(BudgetAdvisor.Domain.Models.SyncResult result)
+    {
+        await SyncService.RefreshAsync();
+        Snackbar.Add(result.Message, result.IsSuccess ? Severity.Success : Severity.Error);
     }
 
     private string GetUndoLabel()
@@ -133,6 +218,16 @@
 
     private void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e) =>
         InvokeAsync(StateHasChanged);
+
+    private string GetConnectedAccountText() =>
+        string.IsNullOrWhiteSpace(SyncService.Metadata.ConnectedAccountName)
+            ? Localizer["sync.notAvailable"]
+            : SyncService.Metadata.ConnectedAccountName;
+
+    private string FormatSyncTimestamp(DateTimeOffset? timestampUtc) =>
+        timestampUtc.HasValue
+            ? timestampUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            : Localizer["sync.never"];
 
     private int GetCurrentTabIndex()
     {
@@ -185,6 +280,7 @@
         Localizer.Changed -= HandleChanged;
         AppState.Changed -= HandleChanged;
         ApplicationLogService.Changed -= HandleChanged;
+        SyncService.Changed -= HandleChanged;
         UndoService.Changed -= HandleChanged;
         NavigationManager.LocationChanged -= HandleLocationChanged;
     }
