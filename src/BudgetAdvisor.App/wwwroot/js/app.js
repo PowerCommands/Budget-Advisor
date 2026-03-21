@@ -58,6 +58,23 @@ window.budgetAdvisor.files = {
         anchor.click();
         anchor.remove();
         URL.revokeObjectURL(url);
+    },
+    downloadBytes: function (fileName, base64Content, contentType) {
+        const binary = window.atob(base64Content);
+        const bytes = new Uint8Array(binary.length);
+
+        for (let index = 0; index < binary.length; index++) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+
+        const blob = new Blob([bytes], { type: contentType });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = fileName;
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
     }
 };
 

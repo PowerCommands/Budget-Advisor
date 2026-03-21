@@ -355,7 +355,7 @@
     {
         get
         {
-            var currentMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+            var currentMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(1);
             var endMonth = upcomingExpensesMonths == ApplicationData.UpcomingExpensesShowAllMonths
                 ? (DateOnly?)null
                 : currentMonth.AddMonths(upcomingExpensesMonths - 1);

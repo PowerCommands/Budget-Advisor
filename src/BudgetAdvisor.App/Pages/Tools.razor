@@ -117,7 +117,7 @@
                                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="HandleExportDataAsync">@Localizer["action.exportBackup"]</MudButton>
                                 <label class="mud-upload-label">
                                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" HtmlTag="span">@Localizer["action.importBackup"]</MudButton>
-                                    <InputFile OnChange="HandleImportDataAsync" accept=".json,application/json" hidden />
+                                    <InputFile OnChange="HandleImportDataAsync" accept=".zip,.json,application/zip,application/json" hidden />
                                 </label>
                             </div>
                         </MudStack>
@@ -596,8 +596,9 @@
 
     private async Task HandleImportDataAsync(InputFileChangeEventArgs args)
     {
-        var json = await ReadFileAsync(args.File);
-        await AppState.ImportAsync(json);
+        var file = args.File;
+        var fileBytes = await ReadFileBytesAsync(file);
+        await AppState.ImportAsync(fileBytes, file.Name);
         statusMessage = Localizer["settings.backupImported"];
     }
 
@@ -895,6 +896,14 @@
     {
         using var reader = new StreamReader(file.OpenReadStream(maxAllowedSize: 1024 * 1024));
         return await reader.ReadToEndAsync();
+    }
+
+    private static async Task<byte[]> ReadFileBytesAsync(IBrowserFile file)
+    {
+        await using var stream = file.OpenReadStream(maxAllowedSize: 1024 * 1024);
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream);
+        return memoryStream.ToArray();
     }
 
     private void HandleChanged() => _ = InvokeAsync(RefreshStateAsync);

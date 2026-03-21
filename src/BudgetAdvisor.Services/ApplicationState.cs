@@ -1946,36 +1946,55 @@ public sealed class ApplicationState
         return rows.OrderByDescending(row => row.Period, StringComparer.Ordinal).ToList();
     }
 
-    public async Task<string> ExportAsync() => await _localStorageService.BackupAsync(
-        BuildExportFileName("budget-advisor-backup"),
-        new BudgetAdvisorBackupPackage
+    public async Task ExportAsync() => await _localStorageService.BackupArchiveAsync(
+        BuildBackupArchiveFileName("budget-advisor-backup"),
+        new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ApplicationData = Data,
-            TransactionImportData = TransactionImportData
+            ["application-data.json"] = _localStorageService.Serialize(Data),
+            ["transaction-import.json"] = _localStorageService.Serialize(TransactionImportData)
         });
 
-    public async Task ImportAsync(string json)
+    public async Task ImportAsync(byte[] fileBytes, string fileName)
     {
-        var backupPackage = await _localStorageService.RestoreAsync<BudgetAdvisorBackupPackage>(json);
-        if (backupPackage?.ApplicationData is not null)
-        {
-            ApplyLoadedData(backupPackage.ApplicationData, backupPackage.TransactionImportData ?? new TransactionImportData(), initializeUndoState: false);
-            await PersistAndNotifyAsync();
-            return;
-        }
+        ArgumentNullException.ThrowIfNull(fileBytes);
 
-        var data = await _localStorageService.RestoreAsync<ApplicationData>(json);
-        if (data is null)
+        if (!IsZipFile(fileName))
         {
             throw new InvalidOperationException("The backup file is invalid.");
         }
 
-        ApplyLoadedData(data, new TransactionImportData(), initializeUndoState: false);
+        var archiveFiles = await _localStorageService.RestoreArchiveAsync(fileBytes);
+        if (!archiveFiles.TryGetValue("application-data.json", out var applicationDataJson))
+        {
+            throw new InvalidOperationException("The backup file is invalid.");
+        }
+
+        var applicationData = await _localStorageService.RestoreAsync<ApplicationData>(applicationDataJson);
+        if (applicationData is null)
+        {
+            throw new InvalidOperationException("The backup file is invalid.");
+        }
+
+        TransactionImportData transactionImportData;
+        if (archiveFiles.TryGetValue("transaction-import.json", out var transactionImportDataJson))
+        {
+            transactionImportData = await _localStorageService.RestoreAsync<TransactionImportData>(transactionImportDataJson) ?? new TransactionImportData();
+        }
+        else
+        {
+            transactionImportData = new TransactionImportData();
+        }
+
+        ApplyLoadedData(applicationData, transactionImportData, initializeUndoState: false);
         await PersistAndNotifyAsync();
     }
 
-    private static string BuildExportFileName(string baseName) =>
-        $"{baseName}-{DateTime.Now:yyyyMMddHHmm}.json";
+    private static string BuildBackupArchiveFileName(string baseName) =>
+        $"{baseName}-{DateTime.Now:yyyyMMddHHmm}.zip";
+
+    private static bool IsZipFile(string? fileName) =>
+        !string.IsNullOrWhiteSpace(fileName) &&
+        fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 
     public async Task SetCurrencyAsync(string currencyCode)
     {
@@ -3868,6 +3887,7 @@ public sealed class ApplicationState
     private static IReadOnlyList<SubcategoryDefinition> GetDefaultSubcategoryDefinitions() =>
     [
         new() { Key = "subcategory.income.salary", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Lön", EnglishName = "Salary" },
+        new() { Key = "subcategory.income.tax_refund", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Skatteåterbäring", EnglishName = "Tax refund" },
         new() { Key = "subcategory.income.inheritance", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Arv", EnglishName = "Inheritance" },
         new() { Key = "subcategory.income.interest", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Ränta", EnglishName = "Interest" },
         new() { Key = "subcategory.income.gambling_winnings", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Spelvinst", EnglishName = "Gambling winnings" },
@@ -3899,6 +3919,7 @@ public sealed class ApplicationState
         new() { Key = "subcategory.transport.car_insurance", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Bilförsäkring", EnglishName = "Car insurance" },
         new() { Key = "subcategory.transport.vehicle_tax", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Fordonskatt", EnglishName = "Vehicle tax" },
         new() { Key = "subcategory.transport.service", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Service", EnglishName = "Service" },
+        new() { Key = "subcategory.transport.inspection", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Besiktning", EnglishName = "Inspection" },
         new() { Key = "subcategory.transport.repair", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Reparation", EnglishName = "Repair" },
         new() { Key = "subcategory.transport.tires", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Däck", EnglishName = "Tires" },
         new() { Key = "subcategory.transport.parking", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Parkering", EnglishName = "Parking" },

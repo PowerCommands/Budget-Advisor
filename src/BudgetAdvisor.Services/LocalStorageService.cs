@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using Microsoft.JSInterop;
 
@@ -39,6 +41,21 @@ public sealed class LocalStorageService
         return json;
     }
 
+    public async Task<byte[]> BackupArchiveAsync(string fileName, IReadOnlyDictionary<string, string> files)
+    {
+        ArgumentNullException.ThrowIfNull(fileName);
+        ArgumentNullException.ThrowIfNull(files);
+
+        var archiveBytes = CreateZipArchive(files);
+        await _jsRuntime.InvokeVoidAsync(
+            "budgetAdvisor.files.downloadBytes",
+            fileName,
+            Convert.ToBase64String(archiveBytes),
+            "application/zip");
+
+        return archiveBytes;
+    }
+
     public string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
 
     public T? Deserialize<T>(string json) => JsonSerializer.Deserialize<T>(json, JsonOptions);
@@ -70,5 +87,45 @@ public sealed class LocalStorageService
     {
         var value = Deserialize<T>(json);
         return Task.FromResult(value);
+    }
+
+    public Task<IReadOnlyDictionary<string, string>> RestoreArchiveAsync(byte[] archiveBytes)
+    {
+        ArgumentNullException.ThrowIfNull(archiveBytes);
+
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var stream = new MemoryStream(archiveBytes, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+
+        foreach (var entry in archive.Entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Name))
+            {
+                continue;
+            }
+
+            using var entryStream = entry.Open();
+            using var reader = new StreamReader(entryStream, Encoding.UTF8);
+            files[entry.Name] = reader.ReadToEnd();
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<string, string>>(files);
+    }
+
+    private static byte[] CreateZipArchive(IReadOnlyDictionary<string, string> files)
+    {
+        using var stream = new MemoryStream();
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var file in files)
+            {
+                var entry = archive.CreateEntry(file.Key, CompressionLevel.Optimal);
+                using var entryStream = entry.Open();
+                using var writer = new StreamWriter(entryStream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                writer.Write(file.Value);
+            }
+        }
+
+        return stream.ToArray();
     }
 }

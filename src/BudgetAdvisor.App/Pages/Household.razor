@@ -59,6 +59,11 @@
                                 </td>
                             </tr>
                         }
+                        <tr class="table-summary-row">
+                            <td colspan="4"><strong>@($"{Localizer["table.sum"]}:")</strong></td>
+                            <td><strong>@AppState.FormatCurrency(TotalIncomeAmount)</strong></td>
+                            <td></td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -261,6 +266,8 @@
             .ThenBy(record => GetIncomeOwnerLabel(record))
             .ThenBy(record => GetIncomeTypeDisplay(record))
             .ToList();
+
+    private decimal TotalIncomeAmount => IncomeEntries.Sum(record => record.Amount);
 
     protected override void OnInitialized()
     {
