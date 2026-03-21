@@ -13,10 +13,22 @@
 
             @if (ShowAllCostsToggle)
             {
-                <label class="form-check-label d-flex align-items-center gap-2">
-                    <InputCheckbox class="form-check-input mt-0" Value="IncludeAllCosts" ValueChanged="HandleIncludeAllCostsChanged" ValueExpression="() => IncludeAllCosts" />
-                    <span>@Localizer["filter.showAllCosts"]</span>
-                </label>
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <label class="form-check-label d-flex align-items-center gap-2">
+                        <InputCheckbox class="form-check-input mt-0" Value="IncludeAllCosts" ValueChanged="HandleIncludeAllCostsChanged" ValueExpression="() => IncludeAllCosts" />
+                        <span>@Localizer["filter.showAllCosts"]</span>
+                    </label>
+                    @if (OnDeleteFiltered.HasDelegate)
+                    {
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Error"
+                                   StartIcon="@Icons.Material.Filled.DeleteSweep"
+                                   Disabled="@(FilteredEntries.Count == 0)"
+                                   OnClick="HandleDeleteFilteredAsync">
+                            @Localizer["action.deleteAll"]
+                        </MudButton>
+                    }
+                </div>
             }
         </div>
     }
@@ -141,6 +153,9 @@
     public EventCallback<ExpenseEntry> OnDelete { get; set; }
 
     [Parameter]
+    public EventCallback<IReadOnlyList<ExpenseEntry>> OnDeleteFiltered { get; set; }
+
+    [Parameter]
     public bool DefaultToCurrentMonth { get; set; }
 
     private IReadOnlyList<ExpenseEntry> FilteredEntries => AppState.GetFilteredExpenseEntries(filter);
@@ -186,6 +201,16 @@
         filter.CategoryFilter = string.Empty;
         filter.SubcategoryFilter = string.Empty;
         await IncludeAllCostsChanged.InvokeAsync(includeAllCosts);
+    }
+
+    private async Task HandleDeleteFilteredAsync()
+    {
+        if (!OnDeleteFiltered.HasDelegate || FilteredEntries.Count == 0)
+        {
+            return;
+        }
+
+        await OnDeleteFiltered.InvokeAsync(FilteredEntries.ToList());
     }
 
     private ExpenseQueryScope ResolveScope() =>

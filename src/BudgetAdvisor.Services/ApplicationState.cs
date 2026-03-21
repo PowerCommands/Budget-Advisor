@@ -10,6 +10,7 @@ namespace BudgetAdvisor.Services;
 public sealed class ApplicationState
 {
     public const string ApplicationDataKey = "budget-advisor.application-data";
+    public const string TransactionImportDataKey = "budget-advisor.transaction-import";
     private const string SalaryIncomeType = "Salary";
     private const string TaxRefundIncomeType = "Tax refund";
     private const string InheritanceIncomeType = "Inheritance";
@@ -34,6 +35,7 @@ public sealed class ApplicationState
     public event Action? Changed;
 
     public ApplicationData Data { get; private set; } = new();
+    public TransactionImportData TransactionImportData { get; private set; } = new();
 
     public ApplicationState(LocalStorageService localStorageService, LocalizationService localizer, IApplicationLogService applicationLogService, IDataPruningService dataPruningService, IUndoService undoService)
     {
@@ -46,14 +48,14 @@ public sealed class ApplicationState
 
     public async Task InitializeAsync()
     {
-        var data = await _localStorageService.LoadAsync<ApplicationData>(ApplicationDataKey) ?? new ApplicationData();
-        ApplyLoadedData(data, initializeUndoState: true);
+        var (data, transactionImportData) = await LoadStateAsync();
+        ApplyLoadedData(data, transactionImportData, initializeUndoState: true);
     }
 
     public async Task ReloadFromStorageAsync()
     {
-        var data = await _localStorageService.LoadAsync<ApplicationData>(ApplicationDataKey) ?? new ApplicationData();
-        ApplyLoadedData(data, initializeUndoState: true);
+        var (data, transactionImportData) = await LoadStateAsync();
+        ApplyLoadedData(data, transactionImportData, initializeUndoState: true);
         Changed?.Invoke();
     }
 
@@ -106,9 +108,9 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.added", "log.entity.member", memberName));
     }
 
-    public async Task AddOneTimeIncomeAsync(Guid memberId, decimal amount, int year, int month, string type, string? metadata = null, Guid? savingsAccountId = null, Guid? assetId = null)
+    public async Task AddOneTimeIncomeAsync(Guid memberId, decimal amount, int year, int month, string type, string? metadata = null, Guid? savingsAccountId = null, Guid? assetId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null)
     {
-        Data.IncomeRecords.Add(CreateOneTimeIncomeEntry(memberId, amount, year, month, NormalizeSystemIncomeType(type), metadata, savingsAccountId, assetId));
+        Data.IncomeRecords.Add(CreateOneTimeIncomeEntry(memberId, amount, year, month, NormalizeSystemIncomeType(type), metadata, savingsAccountId, assetId, transactionDate, importId, importOccurrence));
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.household"], _localizer["household.incomesTab"]),
@@ -233,9 +235,9 @@ public sealed class ApplicationState
         return true;
     }
 
-    public async Task AddOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null)
+    public async Task AddOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null)
     {
-        _ = AddOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId);
+        _ = AddOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId, transactionDate, importId, importOccurrence);
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
@@ -268,6 +270,8 @@ public sealed class ApplicationState
                 StartMonth = startDate.Month,
                 EndYear = draft.EndDate.Value.Year,
                 EndMonth = draft.EndDate.Value.Month,
+                ImportId = draft.ImportId,
+                ImportOccurrence = draft.ImportOccurrence,
                 Category = draft.Category,
                 Subcategory = draft.Subcategory.Trim()
             });
@@ -286,14 +290,51 @@ public sealed class ApplicationState
             draft.Category,
             draft.Subcategory,
             draft.Description,
+            draft.Date,
             null,
             null,
             null,
-            null));
+            null,
+            draft.ImportId,
+            draft.ImportOccurrence));
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
             BuildLogActivity("log.verb.imported", "log.entity.expense", draft.Description));
+    }
+
+    public async Task ImportTransactionAsync(ImportedTransactionDraft draft)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        var normalizedSubcategory = draft.Subcategory.Trim();
+        var normalizedDescription = draft.Description.Trim();
+        var absoluteAmount = Math.Abs(draft.SignedAmount);
+        if (absoluteAmount <= 0m)
+        {
+            throw new InvalidOperationException("Imported transaction amount must be greater than zero.");
+        }
+
+        if (draft.MainCategory == SubcategoryMainCategory.Income)
+        {
+            await AddOneTimeIncomeAsync(Guid.Empty, absoluteAmount, draft.Date.Year, draft.Date.Month, normalizedSubcategory, normalizedDescription, transactionDate: draft.Date, importId: draft.ImportId, importOccurrence: draft.ImportOccurrence);
+            return;
+        }
+
+        var expenseCategory = MapImportedMainCategoryToExpenseCategory(draft.MainCategory);
+        await ImportExpenseEntryAsync(new ImportedExpenseDraft
+        {
+            Date = draft.Date,
+            StartDate = draft.IsRecurring ? draft.StartDate : null,
+            EndDate = draft.IsRecurring ? draft.EndDate : null,
+            Amount = absoluteAmount,
+            IsRecurring = draft.IsRecurring,
+            Category = expenseCategory,
+            Subcategory = normalizedSubcategory,
+            Description = normalizedDescription,
+            ImportId = draft.ImportId,
+            ImportOccurrence = draft.ImportOccurrence
+        });
     }
 
     public async Task AddSubscriptionAsync(string name, decimal amount, int intervalMonths, int startYear, int startMonth, int? endYear, int? endMonth, ExpenseCategory category, string subcategory)
@@ -835,7 +876,8 @@ public sealed class ApplicationState
             GetSavingsSubcategory(account.AccountType),
             account.AccountName,
             account.Id,
-            null));
+            null,
+            date));
 
         await RecalculateSavingsAccountBalancesAsync(account.Id, NormalizeMonth(date));
         await LogActivityAsync(
@@ -874,6 +916,7 @@ public sealed class ApplicationState
                 ExpenseCategory.Assets,
                 asset.Type,
                 asset.Name,
+                acquisitionDate,
                 asset.Name,
                 null,
                 null,
@@ -920,7 +963,7 @@ public sealed class ApplicationState
             throw new InvalidOperationException("Sale amount must be greater than zero.");
         }
 
-        var incomeEntry = CreateOneTimeIncomeEntry(Guid.Empty, saleAmount, saleDate.Year, saleDate.Month, AssetSaleSubcategory, asset.Name, null, asset.Id);
+        var incomeEntry = CreateOneTimeIncomeEntry(Guid.Empty, saleAmount, saleDate.Year, saleDate.Month, AssetSaleSubcategory, asset.Name, null, asset.Id, saleDate);
         Data.IncomeRecords.Add(incomeEntry);
 
         if (bankSavingsAccountId.HasValue)
@@ -1088,6 +1131,7 @@ public sealed class ApplicationState
             Amount = amount,
             Year = purchaseDate.Year,
             Month = purchaseDate.Month,
+            TransactionDate = purchaseDate,
             Category = category,
             Subcategory = normalizedSubcategory,
             Metadata = CreditMetadata,
@@ -1426,6 +1470,8 @@ public sealed class ApplicationState
                     Amount = subscription.Amount,
                     Year = current.Year,
                     Month = current.Month,
+                    ImportId = subscription.ImportId,
+                    ImportOccurrence = NormalizeImportOccurrence(subscription.ImportOccurrence),
                     Category = subscription.Category,
                     Subcategory = subscription.Subcategory,
                     Description = subscription.Name,
@@ -1900,17 +1946,31 @@ public sealed class ApplicationState
         return rows.OrderByDescending(row => row.Period, StringComparer.Ordinal).ToList();
     }
 
-    public async Task<string> ExportAsync() => await _localStorageService.BackupAsync(BuildExportFileName("budget-advisor-backup"), Data);
+    public async Task<string> ExportAsync() => await _localStorageService.BackupAsync(
+        BuildExportFileName("budget-advisor-backup"),
+        new BudgetAdvisorBackupPackage
+        {
+            ApplicationData = Data,
+            TransactionImportData = TransactionImportData
+        });
 
     public async Task ImportAsync(string json)
     {
+        var backupPackage = await _localStorageService.RestoreAsync<BudgetAdvisorBackupPackage>(json);
+        if (backupPackage?.ApplicationData is not null)
+        {
+            ApplyLoadedData(backupPackage.ApplicationData, backupPackage.TransactionImportData ?? new TransactionImportData(), initializeUndoState: false);
+            await PersistAndNotifyAsync();
+            return;
+        }
+
         var data = await _localStorageService.RestoreAsync<ApplicationData>(json);
         if (data is null)
         {
             throw new InvalidOperationException("The backup file is invalid.");
         }
 
-        ApplyLoadedData(data, initializeUndoState: false);
+        ApplyLoadedData(data, new TransactionImportData(), initializeUndoState: false);
         await PersistAndNotifyAsync();
     }
 
@@ -1974,22 +2034,11 @@ public sealed class ApplicationState
         await PersistAndNotifyAsync();
     }
 
-    public async Task SetLatestImportedExpenseDateAsync(DateOnly latestImportedExpenseDate)
-    {
-        if (Data.LatestImportedExpenseDate.HasValue && Data.LatestImportedExpenseDate.Value >= latestImportedExpenseDate)
-        {
-            return;
-        }
-
-        Data.LatestImportedExpenseDate = latestImportedExpenseDate;
-        await PersistAndNotifyAsync();
-    }
-
     public async Task SaveImportedExpenseCategorySuggestionsAsync(IEnumerable<ImportedExpenseCategorySuggestion> suggestions)
     {
         ArgumentNullException.ThrowIfNull(suggestions);
 
-        var mergedSuggestions = Data.ImportedExpenseCategorySuggestions
+        var mergedSuggestions = TransactionImportData.ImportedExpenseCategorySuggestions
             .Concat(suggestions)
             .Where(suggestion =>
                 !string.IsNullOrWhiteSpace(suggestion.Description) &&
@@ -2011,24 +2060,74 @@ public sealed class ApplicationState
             .ThenBy(suggestion => suggestion.Subcategory, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (mergedSuggestions.SequenceEqual(Data.ImportedExpenseCategorySuggestions, ImportedExpenseCategorySuggestionComparer.Instance))
+        if (mergedSuggestions.SequenceEqual(TransactionImportData.ImportedExpenseCategorySuggestions, ImportedExpenseCategorySuggestionComparer.Instance))
         {
             return;
         }
 
-        Data.ImportedExpenseCategorySuggestions = mergedSuggestions;
-        await PersistAndNotifyAsync();
+        TransactionImportData.ImportedExpenseCategorySuggestions = mergedSuggestions;
+        await PersistTransactionImportDataAndNotifyAsync();
     }
 
     public async Task ClearImportedExpenseCategorySuggestionsAsync()
     {
-        if (Data.ImportedExpenseCategorySuggestions.Count == 0)
+        if (TransactionImportData.ImportedExpenseCategorySuggestions.Count == 0)
         {
             return;
         }
 
-        Data.ImportedExpenseCategorySuggestions.Clear();
-        await PersistAndNotifyAsync();
+        TransactionImportData.ImportedExpenseCategorySuggestions.Clear();
+        await PersistTransactionImportDataAndNotifyAsync();
+    }
+
+    public async Task RecordTransactionImportBatchAsync(Guid importId, int importedRecordCount)
+    {
+        if (importId == Guid.Empty || importedRecordCount <= 0)
+        {
+            return;
+        }
+
+        TransactionImportData.ImportBatches.RemoveAll(batch => batch.ImportId == importId);
+        TransactionImportData.ImportBatches.Add(new TransactionImportBatch
+        {
+            ImportId = importId,
+            ImportedAtUtc = DateTime.UtcNow,
+            ImportedRecordCount = importedRecordCount
+        });
+
+        await PersistTransactionImportDataAndNotifyAsync();
+    }
+
+    public async Task<int> RemoveTransactionImportAsync(Guid importId)
+    {
+        if (importId == Guid.Empty)
+        {
+            return 0;
+        }
+
+        var removedSubscriptionIds = Data.Subscriptions
+            .Where(subscription => subscription.ImportId == importId)
+            .Select(subscription => subscription.Id)
+            .ToHashSet();
+
+        Data.Subscriptions.RemoveAll(subscription => subscription.ImportId == importId);
+
+        var removedIncomeCount = Data.IncomeRecords.RemoveAll(income => income.ImportId == importId);
+        var removedExpenseCount = Data.ExpenseRecords.RemoveAll(expense =>
+            expense.ImportId == importId ||
+            (expense.SubscriptionDefinitionId.HasValue && removedSubscriptionIds.Contains(expense.SubscriptionDefinitionId.Value)));
+
+        var removedBatchCount = TransactionImportData.ImportBatches.RemoveAll(batch => batch.ImportId == importId);
+        if (removedIncomeCount == 0 && removedExpenseCount == 0 && removedBatchCount == 0 && removedSubscriptionIds.Count == 0)
+        {
+            return 0;
+        }
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.importTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.expense", importId.ToString()));
+
+        return removedIncomeCount + removedExpenseCount;
     }
 
     public async Task<DataPruningSummary> PruneDataAsync(DateOnly cutoffDate)
@@ -2081,6 +2180,46 @@ public sealed class ApplicationState
         }
 
         await PersistAndNotifyAsync();
+    }
+
+    public async Task RemoveExpensesAsync(IEnumerable<Guid> expenseIds)
+    {
+        ArgumentNullException.ThrowIfNull(expenseIds);
+
+        var ids = expenseIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToHashSet();
+
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var expensesToRemove = Data.ExpenseRecords
+            .Where(expense => ids.Contains(expense.Id))
+            .ToList();
+
+        if (expensesToRemove.Count == 0)
+        {
+            return;
+        }
+
+        var requiresSavingsRecalculation = expensesToRemove.Any(expense => expense.SavingsAccountId.HasValue);
+        Data.ExpenseRecords.RemoveAll(expense => ids.Contains(expense.Id));
+
+        if (requiresSavingsRecalculation)
+        {
+            await RecalculateSavingsBalancesAsync();
+        }
+        else
+        {
+            await PersistAndNotifyAsync();
+        }
+
+        await LogActivityAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.expense", expensesToRemove.Count.ToString(CultureInfo.InvariantCulture)));
     }
 
     public async Task RemoveSubscriptionAsync(Guid subscriptionId)
@@ -2407,7 +2546,14 @@ public sealed class ApplicationState
 
         var json = _localStorageService.Serialize(Data);
         await _localStorageService.SaveJsonAsync(ApplicationDataKey, json);
+        await _localStorageService.SaveAsync(TransactionImportDataKey, TransactionImportData);
         _undoService.CommitSavedState(json);
+        Changed?.Invoke();
+    }
+
+    private async Task PersistTransactionImportDataAndNotifyAsync()
+    {
+        await _localStorageService.SaveAsync(TransactionImportDataKey, TransactionImportData);
         Changed?.Invoke();
     }
 
@@ -2480,7 +2626,6 @@ public sealed class ApplicationState
         Data.IncomeRecords ??= [];
         Data.SalaryIncomePeriods ??= [];
         Data.SubcategoryDefinitions ??= [];
-        Data.ImportedExpenseCategorySuggestions ??= [];
         Data.ExpenseRecords ??= [];
         Data.Subscriptions ??= [];
         Data.HousingDefinitions ??= [];
@@ -2546,6 +2691,7 @@ public sealed class ApplicationState
             }
 
             income.Metadata ??= string.Empty;
+            income.ImportOccurrence = NormalizeImportOccurrence(income.ImportOccurrence);
         }
 
         foreach (var salaryPeriod in Data.SalaryIncomePeriods)
@@ -2569,10 +2715,15 @@ public sealed class ApplicationState
         foreach (var expense in Data.ExpenseRecords)
         {
             expense.Metadata ??= string.Empty;
+            expense.ImportOccurrence = NormalizeImportOccurrence(expense.ImportOccurrence);
+        }
+
+        foreach (var subscription in Data.Subscriptions)
+        {
+            subscription.ImportOccurrence = NormalizeImportOccurrence(subscription.ImportOccurrence);
         }
 
         NormalizeSubcategoryDefinitions();
-        NormalizeImportedExpenseCategorySuggestions();
         NormalizeClosedMonths();
 
         foreach (var asset in Data.Assets)
@@ -2638,15 +2789,27 @@ public sealed class ApplicationState
         RebuildMonthlyBalancesInMemory();
     }
 
-    private void ApplyLoadedData(ApplicationData data, bool initializeUndoState)
+    private void ApplyLoadedData(ApplicationData data, TransactionImportData transactionImportData, bool initializeUndoState)
     {
         Data = data;
         NormalizeData();
+        TransactionImportData = transactionImportData;
+        NormalizeTransactionImportData();
 
         if (initializeUndoState)
         {
             _undoService.InitializeCurrentState(_localStorageService.Serialize(Data));
         }
+    }
+
+    private async Task<(ApplicationData Data, TransactionImportData TransactionImportData)> LoadStateAsync()
+    {
+        var data = await _localStorageService.LoadAsync<ApplicationData>(ApplicationDataKey) ?? new ApplicationData();
+        var transactionImportData = await _localStorageService.LoadAsync<TransactionImportData>(TransactionImportDataKey) ?? new TransactionImportData();
+
+        NormalizeImportedExpenseCategorySuggestions(transactionImportData);
+
+        return (data, transactionImportData);
     }
 
     public decimal GetLoanCurrentBalance(Guid loanId) => GetCurrentOrLatestBalance(loanId);
@@ -3411,12 +3574,15 @@ public sealed class ApplicationState
         return metadata?.Trim() ?? string.Empty;
     }
 
-    private IncomeEntry CreateOneTimeIncomeEntry(Guid memberId, decimal amount, int year, int month, string type, string? metadata, Guid? savingsAccountId, Guid? assetId) => new()
+    private IncomeEntry CreateOneTimeIncomeEntry(Guid memberId, decimal amount, int year, int month, string type, string? metadata, Guid? savingsAccountId, Guid? assetId, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null) => new()
     {
         MemberId = memberId,
         Amount = amount,
         Year = year,
         Month = month,
+        TransactionDate = transactionDate,
+        ImportId = importId,
+        ImportOccurrence = NormalizeImportOccurrence(importOccurrence),
         Type = type.Trim(),
         Metadata = metadata?.Trim() ?? string.Empty,
         SavingsAccountId = savingsAccountId,
@@ -3430,14 +3596,20 @@ public sealed class ApplicationState
         ExpenseCategory category,
         string subcategory,
         string description,
+        DateOnly? transactionDate,
         string? metadata,
         Guid? transportVehicleId,
         Guid? savingsAccountId,
-        Guid? assetId) => new()
+        Guid? assetId,
+        Guid? importId = null,
+        int? importOccurrence = null) => new()
         {
             Amount = amount,
             Year = year,
             Month = month,
+            TransactionDate = transactionDate,
+            ImportId = importId,
+            ImportOccurrence = NormalizeImportOccurrence(importOccurrence),
             Category = category,
             Subcategory = subcategory.Trim(),
             Metadata = NormalizeExpenseMetadata(category, transportVehicleId, metadata),
@@ -3455,6 +3627,7 @@ public sealed class ApplicationState
             ExpenseCategory.Savings,
             GetSavingsSubcategory(account.AccountType),
             account.AccountName,
+            date,
             account.AccountName,
             null,
             account.Id,
@@ -3699,6 +3872,7 @@ public sealed class ApplicationState
         new() { Key = "subcategory.income.interest", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Ränta", EnglishName = "Interest" },
         new() { Key = "subcategory.income.gambling_winnings", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Spelvinst", EnglishName = "Gambling winnings" },
         new() { Key = "subcategory.income.dividend", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Utdelning", EnglishName = "Dividend" },
+        new() { Key = "subcategory.income.other", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Annat", EnglishName = "Other" },
         new() { Key = "subcategory.income.withdrawal", MainCategory = SubcategoryMainCategory.Income, SwedishName = "Uttag", EnglishName = "Withdrawal" },
         new() { Key = "subcategory.food.grocery", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Matbutik", EnglishName = "Grocery store" },
         new() { Key = "subcategory.food.delivery", MainCategory = SubcategoryMainCategory.Food, SwedishName = "Hemkörning", EnglishName = "Delivery" },
@@ -3857,9 +4031,25 @@ public sealed class ApplicationState
         EnglishName = definition.EnglishName
     };
 
-    private void NormalizeImportedExpenseCategorySuggestions()
+    private void NormalizeTransactionImportData()
     {
-        Data.ImportedExpenseCategorySuggestions = Data.ImportedExpenseCategorySuggestions
+        TransactionImportData.ImportBatches ??= [];
+        TransactionImportData.ImportBatches = TransactionImportData.ImportBatches
+            .Where(batch => batch.ImportId != Guid.Empty && batch.ImportedRecordCount > 0)
+            .GroupBy(batch => batch.ImportId)
+            .Select(group => group
+                .OrderByDescending(batch => batch.ImportedAtUtc)
+                .First())
+            .OrderByDescending(batch => batch.ImportedAtUtc)
+            .ToList();
+
+        NormalizeImportedExpenseCategorySuggestions(TransactionImportData);
+    }
+
+    private static void NormalizeImportedExpenseCategorySuggestions(TransactionImportData transactionImportData)
+    {
+        transactionImportData.ImportedExpenseCategorySuggestions ??= [];
+        transactionImportData.ImportedExpenseCategorySuggestions = transactionImportData.ImportedExpenseCategorySuggestions
             .Where(suggestion =>
                 !string.IsNullOrWhiteSpace(suggestion.Description) &&
                 !string.IsNullOrWhiteSpace(suggestion.Subcategory))
@@ -3880,6 +4070,15 @@ public sealed class ApplicationState
             .ThenBy(suggestion => suggestion.Subcategory, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    private static ExpenseCategory MapImportedMainCategoryToExpenseCategory(SubcategoryMainCategory mainCategory) => mainCategory switch
+    {
+        SubcategoryMainCategory.Food => ExpenseCategory.Food,
+        SubcategoryMainCategory.Housing => ExpenseCategory.Housing,
+        SubcategoryMainCategory.Transport => ExpenseCategory.Transport,
+        SubcategoryMainCategory.Clothing => ExpenseCategory.Clothing,
+        _ => ExpenseCategory.Other
+    };
 
     private sealed class ImportedExpenseCategorySuggestionComparer : IEqualityComparer<ImportedExpenseCategorySuggestion>
     {
@@ -3915,6 +4114,11 @@ public sealed class ApplicationState
         ExpenseCategory.Other => SubcategoryMainCategory.Other,
         _ => null
     };
+
+    private static int? NormalizeImportOccurrence(int? importOccurrence) =>
+        importOccurrence.HasValue && importOccurrence.Value > 0
+            ? importOccurrence.Value
+            : null;
 
     private void RemoveGeneratedCreditExpensesInRange(DateOnly startDate, DateOnly endDate)
     {
@@ -4303,9 +4507,9 @@ public sealed class ApplicationState
         return entry.Id;
     }
 
-    private ExpenseEntry AddOneTimeExpenseEntry(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null)
+    private ExpenseEntry AddOneTimeExpenseEntry(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null)
     {
-        var entry = CreateOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId);
+        var entry = CreateOneTimeExpenseEntry(amount, year, month, category, subcategory, description, transactionDate, metadata, transportVehicleId, savingsAccountId, assetId, importId, importOccurrence);
         Data.ExpenseRecords.Add(entry);
         return entry;
     }

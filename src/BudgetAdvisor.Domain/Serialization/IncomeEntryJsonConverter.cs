@@ -19,6 +19,9 @@ public sealed class IncomeEntryJsonConverter : JsonConverter<IncomeEntry>
             Amount = TryGetDecimal(root, nameof(IncomeEntry.Amount)),
             Year = TryGetInt(root, nameof(IncomeEntry.Year)),
             Month = TryGetInt(root, nameof(IncomeEntry.Month)),
+            TransactionDate = TryGetDateOnly(root, nameof(IncomeEntry.TransactionDate)),
+            ImportId = TryGetGuid(root, nameof(IncomeEntry.ImportId)),
+            ImportOccurrence = TryGetNullableInt(root, nameof(IncomeEntry.ImportOccurrence)),
             Type = ReadType(root),
             Metadata = TryGetString(root, nameof(IncomeEntry.Metadata)),
             SavingsAccountId = TryGetGuid(root, nameof(IncomeEntry.SavingsAccountId)),
@@ -37,6 +40,34 @@ public sealed class IncomeEntryJsonConverter : JsonConverter<IncomeEntry>
         writer.WriteNumber(nameof(IncomeEntry.Amount), value.Amount);
         writer.WriteNumber(nameof(IncomeEntry.Year), value.Year);
         writer.WriteNumber(nameof(IncomeEntry.Month), value.Month);
+
+        if (value.TransactionDate.HasValue)
+        {
+            writer.WriteString(nameof(IncomeEntry.TransactionDate), value.TransactionDate.Value.ToString("yyyy-MM-dd"));
+        }
+        else
+        {
+            writer.WriteNull(nameof(IncomeEntry.TransactionDate));
+        }
+
+        if (value.ImportId.HasValue)
+        {
+            writer.WriteString(nameof(IncomeEntry.ImportId), value.ImportId.Value);
+        }
+        else
+        {
+            writer.WriteNull(nameof(IncomeEntry.ImportId));
+        }
+
+        if (value.ImportOccurrence.HasValue)
+        {
+            writer.WriteNumber(nameof(IncomeEntry.ImportOccurrence), value.ImportOccurrence.Value);
+        }
+        else
+        {
+            writer.WriteNull(nameof(IncomeEntry.ImportOccurrence));
+        }
+
         writer.WriteString(nameof(IncomeEntry.Type), value.Type);
         writer.WriteString(nameof(IncomeEntry.Metadata), value.Metadata);
 
@@ -112,6 +143,29 @@ public sealed class IncomeEntryJsonConverter : JsonConverter<IncomeEntry>
 
     private static int TryGetInt(JsonElement root, string propertyName) =>
         root.TryGetProperty(propertyName, out var property) && property.TryGetInt32(out var value) ? value : 0;
+
+    private static int? TryGetNullableInt(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return property.TryGetInt32(out var value) ? value : null;
+    }
+
+    private static DateOnly? TryGetDateOnly(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String &&
+               DateOnly.TryParse(property.GetString(), out var value)
+            ? value
+            : null;
+    }
 
     private static string TryGetString(JsonElement root, string propertyName) =>
         root.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String

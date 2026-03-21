@@ -245,19 +245,62 @@
                            Variant="Variant.Filled"
                            Color="Color.Primary"
                            StartIcon="@Icons.Material.Filled.UploadFile">
-                    <img src="images/import-default.svg" alt="Import" style="height: 22px; width: auto; margin-right: 8px;" />
                     @Localizer["expenses.import.uploadFile"]
                     <InputFile OnChange="HandleSwedbankFileSelectedAsync" accept=".csv,text/csv" hidden />
                 </MudButton>
 
-                <div class="d-flex flex-column gap-2">
-                    <span class="section-note">@Localizer["expenses.import.supportedBanks"]</span>
-                    <div class="d-flex align-items-center flex-wrap gap-3">
+                <div class="d-flex flex-column gap-2 align-self-stretch w-100">
+                    <span class="section-note d-block">@Localizer["expenses.import.supportedBanks"]</span>
+                    <div class="bank-import-supported-banks">
                         <img src="images/import-swedbank.svg" alt="Swedbank" class="bank-import-provider-logo" />
                         <img src="images/import-nordea.svg" alt="Nordea" class="bank-import-provider-logo" />
                         <img src="images/import-seb.svg" alt="SEB" class="bank-import-provider-logo" />
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <section class="card-panel mt-4">
+            <div class="section-title-row">
+                <h2>@Localizer["expenses.import.logTitle"]</h2>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["field.date"]</th>
+                            <th>@Localizer["field.records"]</th>
+                            <th>@Localizer["field.actions"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (TransactionImportBatches.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="3">@Localizer["expenses.import.noImportLogEntries"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var importBatch in TransactionImportBatches)
+                            {
+                                <tr>
+                                    <td>@FormatImportTimestamp(importBatch.ImportedAtUtc)</td>
+                                    <td>@importBatch.ImportedRecordCount</td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       title="@Localizer["expenses.import.deleteImport"]"
+                                                       aria-label="@Localizer["expenses.import.deleteImport"]"
+                                                       OnClick="@(() => HandleDeleteImportAsync(importBatch))" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
             </div>
         </section>
     </MudTabPanel>
@@ -270,6 +313,7 @@
                              ShowAllCostsToggle="true"
                              IncludeAllCosts="@showAllCosts"
                              IncludeAllCostsChanged="HandleShowAllCostsChanged"
+                             OnDeleteFiltered="HandleDeleteFilteredExpensesAsync"
                              OnDelete="HandleDeleteExpenseAsync" />
     </MudTabPanel>
 </MudTabs>
@@ -301,6 +345,11 @@
     private bool showAllCosts;
     private int upcomingExpensesMonths;
     private decimal? upcomingExpensesMinimumAmount;
+
+    private IReadOnlyList<TransactionImportBatch> TransactionImportBatches =>
+        AppState.TransactionImportData.ImportBatches
+            .OrderByDescending(batch => batch.ImportedAtUtc)
+            .ToList();
 
     private IReadOnlyList<ExpenseEntry> UpcomingExpenseEntries
     {
@@ -348,7 +397,7 @@
     private async Task HandleAddExpenseAsync()
     {
         var date = DateOnly.FromDateTime(oneTimeExpenseForm.Date!.Value);
-        await AppState.AddOneTimeExpenseAsync(oneTimeExpenseForm.Amount, date.Year, date.Month, oneTimeExpenseForm.Category, oneTimeExpenseForm.Subcategory, oneTimeExpenseForm.Description);
+        await AppState.AddOneTimeExpenseAsync(oneTimeExpenseForm.Amount, date.Year, date.Month, oneTimeExpenseForm.Category, oneTimeExpenseForm.Subcategory, oneTimeExpenseForm.Description, transactionDate: date);
         oneTimeExpenseForm = new OneTimeExpenseFormModel();
         ResetExpenseForms();
         statusMessage = Localizer["expenses.expenseAdded"];
@@ -361,18 +410,10 @@
         try
         {
             var fileContent = await ReadFileAsync(args.File);
-            var detectedImport = ImportService.Parse(fileContent);
-            if (detectedImport.Candidates.Count == 0)
-            {
-                statusMessage = Localizer["expenses.import.noNegativeTransactions"];
-                return;
-            }
 
             var parameters = new DialogParameters<BankImportPreviewDialog>
             {
-                { dialog => dialog.ProviderDisplayName, detectedImport.DisplayName },
-                { dialog => dialog.ProviderLogoPath, detectedImport.LogoPath },
-                { dialog => dialog.Transactions, detectedImport.Candidates }
+                { dialog => dialog.FileContent, fileContent }
             };
 
             var options = new DialogOptions
@@ -477,6 +518,68 @@
         statusMessage = Localizer["expenses.expenseDeleted"];
     }
 
+    private async Task HandleDeleteFilteredExpensesAsync(IReadOnlyList<ExpenseEntry> expenses)
+    {
+        if (expenses.Count == 0)
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["expenses.deleteFilteredExpensesTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["expenses.deleteFilteredExpensesMessage"], expenses.Count) },
+            { dialog => dialog.ConfirmText, Localizer["action.deleteAll"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["expenses.deleteFilteredExpensesTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveExpensesAsync(expenses.Select(expense => expense.Id));
+        statusMessage = string.Format(Localizer["expenses.filteredExpensesDeleted"], expenses.Count);
+    }
+
+    private async Task HandleDeleteImportAsync(TransactionImportBatch importBatch)
+    {
+        var relatedRecordCount = AppState.Data.ExpenseRecords.Count(expense => expense.ImportId == importBatch.ImportId) +
+                                 AppState.Data.IncomeRecords.Count(income => income.ImportId == importBatch.ImportId);
+
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["expenses.import.deleteImportTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["expenses.import.deleteImportMessage"], relatedRecordCount) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["expenses.import.deleteImportTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        var removedRecordCount = await AppState.RemoveTransactionImportAsync(importBatch.ImportId);
+        statusMessage = string.Format(Localizer["expenses.import.deletedImport"], removedRecordCount);
+    }
+
     private async Task HandleDeleteSubscriptionAsync(SubscriptionExpenseDefinition subscription)
     {
         var parameters = new DialogParameters<ConfirmDialog>
@@ -508,6 +611,9 @@
         await AppState.ArchiveSubscriptionAsync(subscription.Id);
         statusMessage = Localizer["expenses.subscriptionArchived"];
     }
+
+    private static string FormatImportTimestamp(DateTime timestampUtc) =>
+        timestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
     private async Task HandleArchiveExpiredSubscriptionsAsync()
     {

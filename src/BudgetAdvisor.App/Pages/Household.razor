@@ -289,7 +289,7 @@
     private async Task HandleAddOneTimeIncomeAsync()
     {
         var date = DateOnly.FromDateTime(oneTimeIncomeForm.Date!.Value);
-        await AppState.AddOneTimeIncomeAsync(oneTimeIncomeForm.MemberId!.Value, oneTimeIncomeForm.Amount, date.Year, date.Month, oneTimeIncomeForm.Type);
+        await AppState.AddOneTimeIncomeAsync(oneTimeIncomeForm.MemberId!.Value, oneTimeIncomeForm.Amount, date.Year, date.Month, oneTimeIncomeForm.Type, transactionDate: date);
         oneTimeIncomeForm = new OneTimeIncomeFormModel();
         ResetIncomeForms();
     }

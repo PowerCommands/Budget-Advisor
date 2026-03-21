@@ -4,7 +4,7 @@ namespace BudgetAdvisor.Services;
 
 public sealed class ManualSyncService
 {
-    private const string SyncMetadataKey = "budget-advisor.sync.metadata";
+    public const string SyncMetadataCookieName = "budget-advisor.sync.metadata";
 
     private static readonly IReadOnlyList<SyncFileDescriptor> SyncFiles =
     [
@@ -24,17 +24,10 @@ public sealed class ManualSyncService
         },
         new SyncFileDescriptor
         {
-            FileKey = "localization-data",
-            LocalStorageKey = LocalizationService.LocalizationKey,
-            RemotePath = "/BudgetAdvisor/localization.json",
-            DisplayName = "Localization data"
-        },
-        new SyncFileDescriptor
-        {
-            FileKey = "localization-language",
-            LocalStorageKey = LocalizationService.CurrentLanguageKey,
-            RemotePath = "/BudgetAdvisor/current-language.json",
-            DisplayName = "Current language"
+            FileKey = "transaction-import",
+            LocalStorageKey = ApplicationState.TransactionImportDataKey,
+            RemotePath = "/BudgetAdvisor/transaction-import.json",
+            DisplayName = "Transaction import"
         }
     ];
 
@@ -74,7 +67,7 @@ public sealed class ManualSyncService
             return;
         }
 
-        Metadata = await _localStorageService.LoadAsync<SyncMetadata>(SyncMetadataKey) ?? CreateDefaultMetadata();
+        Metadata = await LoadMetadataAsync();
         if (string.IsNullOrWhiteSpace(Metadata.ProviderId))
         {
             Metadata.ProviderId = DropboxSyncProvider.ProviderIdValue;
@@ -89,6 +82,19 @@ public sealed class ManualSyncService
     {
         await EnsureInitializedAsync();
         await RefreshConnectionStateAsync(cancellationToken);
+        Changed?.Invoke();
+    }
+
+    public async Task ReloadAsync(CancellationToken cancellationToken = default)
+    {
+        Metadata = await LoadMetadataAsync();
+        if (string.IsNullOrWhiteSpace(Metadata.ProviderId))
+        {
+            Metadata.ProviderId = DropboxSyncProvider.ProviderIdValue;
+        }
+
+        await RefreshConnectionStateAsync(cancellationToken);
+        _isInitialized = true;
         Changed?.Invoke();
     }
 
@@ -308,7 +314,22 @@ public sealed class ManualSyncService
 
     private async Task PersistMetadataAsync()
     {
-        await _localStorageService.SaveAsync(SyncMetadataKey, Metadata);
+        await _localStorageService.SetCookieAsync(SyncMetadataCookieName, _localStorageService.Serialize(Metadata));
+    }
+
+    private async Task<SyncMetadata> LoadMetadataAsync()
+    {
+        var cookieJson = await _localStorageService.GetCookieAsync(SyncMetadataCookieName);
+        if (!string.IsNullOrWhiteSpace(cookieJson))
+        {
+            var cookieMetadata = _localStorageService.Deserialize<SyncMetadata>(cookieJson);
+            if (cookieMetadata is not null)
+            {
+                return cookieMetadata;
+            }
+        }
+
+        return CreateDefaultMetadata();
     }
 
     private async Task LogSyncResultAsync(ISyncProvider provider, SyncResult result)
@@ -353,18 +374,11 @@ public sealed class ManualSyncService
                     return "The downloaded activity log file is invalid.";
                 }
             }
-            else if (string.Equals(descriptor.LocalStorageKey, LocalizationService.LocalizationKey, StringComparison.Ordinal))
+            else if (string.Equals(descriptor.LocalStorageKey, ApplicationState.TransactionImportDataKey, StringComparison.Ordinal))
             {
-                if (_localStorageService.Deserialize<List<BudgetAdvisor.Domain.Models.LocalizationResourceSet>>(payload.Content) is null)
+                if (_localStorageService.Deserialize<TransactionImportData>(payload.Content) is null)
                 {
-                    return "The downloaded localization data file is invalid.";
-                }
-            }
-            else if (string.Equals(descriptor.LocalStorageKey, LocalizationService.CurrentLanguageKey, StringComparison.Ordinal))
-            {
-                if (_localStorageService.Deserialize<string>(payload.Content) is null)
-                {
-                    return "The downloaded current language file is invalid.";
+                    return "The downloaded transaction import file is invalid.";
                 }
             }
         }

@@ -1,12 +1,15 @@
 @page "/tools"
 @page "/settings"
 @implements IDisposable
+@using System.Reflection
+@using System.Text.Json
 @inject ApplicationState AppState
 @inject LocalizationService Localizer
 @inject IApplicationLogService ApplicationLogService
 @inject IBrowserStorageUsageService BrowserStorageUsageService
 @inject ManualSyncService SyncService
 @inject IDialogService DialogService
+@inject LocalStorageService LocalStorageService
 @using BudgetAdvisor.Domain.Theming
 
 <MudStack Spacing="3">
@@ -164,6 +167,116 @@
                                        OnClick="HandlePruneDataAsync">
                                 @Localizer["action.pruneData"]
                             </MudButton>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudPaper Class="card-panel" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">@Localizer["settings.files"]</MudText>
+                                <MudText Typo="Typo.body2">@Localizer["settings.filesHelp"]</MudText>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table app-table">
+                                    <thead>
+                                        <tr>
+                                            <th>@Localizer["field.name"]</th>
+                                            <th>@Localizer["field.description"]</th>
+                                            <th>@Localizer["field.records"]</th>
+                                            <th>
+                                                <div class="d-flex align-items-center justify-content-between gap-2">
+                                                    <span>@Localizer["field.actions"]</span>
+                                                    <button type="button"
+                                                            class="btn btn-outline-danger btn-sm d-inline-flex align-items-center gap-2"
+                                                            disabled="@(!LocalStorageFiles.Any(file => file.Exists))"
+                                                            @onclick="HandleDeleteAllLocalStorageFilesAsync">
+                                                        <MudIcon Icon="@Icons.Material.Filled.DeleteSweep" Size="Size.Small" />
+                                                        <span>@Localizer["action.deleteAll"]</span>
+                                                    </button>
+                                                </div>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var file in LocalStorageFiles)
+                                        {
+                                            <tr>
+                                                <td>@file.Key</td>
+                                                <td>@file.Description</td>
+                                                <td>@file.RecordCount</td>
+                                                <td>
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                                   Color="Color.Error"
+                                                                   Size="Size.Small"
+                                                                   Disabled="@(!file.Exists)"
+                                                                   OnClick="@(() => HandleDeleteLocalStorageFileAsync(file))" />
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </MudStack>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="12">
+                    <MudPaper Class="card-panel" Elevation="0">
+                        <MudStack Spacing="2">
+                            <div>
+                                <MudText Typo="Typo.h6">Application data</MudText>
+                            </div>
+
+                            @foreach (var dataSection in ApplicationDataSections)
+                            {
+                                <div>
+                                    <div class="d-flex align-items-center gap-2 mb-1">
+                                        <MudIconButton Icon="@(dataSection.IsExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => ToggleApplicationDataSection(dataSection.Key))" />
+                                        <MudText Typo="Typo.subtitle1">@($"{dataSection.Name} ({dataSection.RowCount})")</MudText>
+                                    </div>
+
+                                    @if (dataSection.IsExpanded)
+                                    {
+                                        <div class="table-responsive">
+                                            <table class="table app-table">
+                                                <thead>
+                                                    <tr>
+                                                        @foreach (var column in dataSection.Columns)
+                                                        {
+                                                            <th>@column</th>
+                                                        }
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @if (dataSection.Rows.Count == 0)
+                                                    {
+                                                        <tr>
+                                                            <td colspan="@(Math.Max(1, dataSection.Columns.Count))">No rows</td>
+                                                        </tr>
+                                                    }
+                                                    else
+                                                    {
+                                                        @foreach (var row in dataSection.Rows)
+                                                        {
+                                                            <tr>
+                                                                @foreach (var cell in row.Cells)
+                                                                {
+                                                                    <td>@cell</td>
+                                                                }
+                                                            </tr>
+                                                        }
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    }
+                                </div>
+                            }
                         </MudStack>
                     </MudPaper>
                 </MudItem>
@@ -432,6 +545,9 @@
     private bool isDropboxConnected;
     private SubcategoryMainCategory selectedSubcategoryMainCategory = SubcategoryMainCategory.Income;
     private List<SubcategoryDefinition> editableSubcategoryDefinitions = [];
+    private List<LocalStorageFileRow> LocalStorageFiles { get; set; } = [];
+    private List<ApplicationDataSection> ApplicationDataSections { get; set; } = [];
+    private Dictionary<string, bool> ExpandedApplicationDataSections { get; set; } = new(StringComparer.Ordinal);
     private SyncResult? latestSyncResult;
 
     protected override async Task OnInitializedAsync()
@@ -441,9 +557,10 @@
         ApplicationLogService.Changed += HandleChanged;
         SyncService.Changed += HandleChanged;
         LoadEditableSubcategoryDefinitions();
+        RebuildApplicationDataSections();
         await SyncService.InitializeAsync();
         SyncUiStateFromService();
-        await RefreshStorageUsageAsync();
+        await RefreshStorageInsightsAsync();
     }
 
     private double[] StorageChartData =>
@@ -592,6 +709,72 @@
         statusMessage = Localizer["settings.activityLogCleared"];
     }
 
+    private async Task HandleDeleteLocalStorageFileAsync(LocalStorageFileRow file)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["settings.deleteFileTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["settings.deleteFileMessage"], file.Key) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["settings.deleteFileTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await LocalStorageService.RemoveAsync(file.Key);
+        await ReloadLocalStorageBackedStateAsync();
+        statusMessage = string.Format(Localizer["settings.fileDeleted"], file.Key);
+    }
+
+    private async Task HandleDeleteAllLocalStorageFilesAsync()
+    {
+        var existingFiles = LocalStorageFiles.Where(file => file.Exists).ToList();
+        if (existingFiles.Count == 0)
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["settings.deleteAllFilesTitle"] },
+            { dialog => dialog.Message, Localizer["settings.deleteAllFilesMessage"] },
+            { dialog => dialog.ConfirmText, Localizer["action.deleteAll"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["settings.deleteAllFilesTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        foreach (var file in existingFiles)
+        {
+            await LocalStorageService.RemoveAsync(file.Key);
+        }
+
+        await ReloadLocalStorageBackedStateAsync();
+        statusMessage = Localizer["settings.allFilesDeleted"];
+    }
+
     private async Task HandlePruneDataAsync()
     {
         if (!pruningCutoffDate.HasValue)
@@ -644,7 +827,7 @@
 
         await SyncService.RefreshAsync();
         SyncUiStateFromService();
-        await RefreshStorageUsageAsync();
+        await RefreshStorageInsightsAsync();
     }
 
     private async Task HandleUploadToDropboxAsync()
@@ -658,7 +841,7 @@
 
         await SyncService.RefreshAsync();
         SyncUiStateFromService();
-        await RefreshStorageUsageAsync();
+        await RefreshStorageInsightsAsync();
     }
 
     private async Task HandleDownloadFromDropboxAsync()
@@ -694,7 +877,7 @@
         await SyncService.RefreshAsync();
         SyncUiStateFromService();
         LoadEditableSubcategoryDefinitions();
-        await RefreshStorageUsageAsync();
+        await RefreshStorageInsightsAsync();
     }
 
     private string GetSubcategoryMainCategoryDisplay(SubcategoryMainCategory category) => category switch
@@ -719,13 +902,43 @@
     private async Task RefreshStateAsync()
     {
         SyncUiStateFromService();
-        await RefreshStorageUsageAsync();
+        RebuildApplicationDataSections();
+        await RefreshStorageInsightsAsync();
         StateHasChanged();
     }
 
-    private async Task RefreshStorageUsageAsync()
+    private async Task RefreshStorageInsightsAsync()
     {
         StorageUsage = await BrowserStorageUsageService.GetUsageAsync();
+        await RefreshLocalStorageFilesAsync();
+    }
+
+    private async Task RefreshLocalStorageFilesAsync()
+    {
+        LocalStorageFiles = [];
+
+        foreach (var descriptor in GetManagedLocalStorageFiles())
+        {
+            var json = await LocalStorageService.LoadJsonAsync(descriptor.Key);
+            LocalStorageFiles.Add(new LocalStorageFileRow(
+                descriptor.Key,
+                descriptor.Description,
+                CountLocalStorageRecords(descriptor.Key, json),
+                !string.IsNullOrWhiteSpace(json)));
+        }
+    }
+
+    private async Task ReloadLocalStorageBackedStateAsync()
+    {
+        await AppState.ReloadFromStorageAsync();
+        await ApplicationLogService.ReloadAsync();
+        await Localizer.ReloadAsync();
+        await SyncService.ReloadAsync();
+        LoadEditableSubcategoryDefinitions();
+        RebuildApplicationDataSections();
+        SyncUiStateFromService();
+        await RefreshStorageInsightsAsync();
+        StateHasChanged();
     }
 
     private void SyncUiStateFromService()
@@ -760,6 +973,79 @@
             ? timestampUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
             : Localizer["sync.never"];
 
+    private IReadOnlyList<ManagedLocalStorageFile> GetManagedLocalStorageFiles() =>
+    [
+        new(ApplicationState.ApplicationDataKey, Localizer["settings.file.applicationData"]),
+        new(BudgetAdvisor.Services.ApplicationLogService.ApplicationLogKey, Localizer["settings.file.applicationLog"]),
+        new(ApplicationState.TransactionImportDataKey, Localizer["settings.file.transactionImport"])
+    ];
+
+    private int CountLocalStorageRecords(string key, string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return 0;
+        }
+
+        return key switch
+        {
+            var value when string.Equals(value, ApplicationState.ApplicationDataKey, StringComparison.Ordinal) => CountApplicationDataRecords(json),
+            var value when string.Equals(value, BudgetAdvisor.Services.ApplicationLogService.ApplicationLogKey, StringComparison.Ordinal) => LocalStorageService.Deserialize<List<ApplicationLogEntry>>(json)?.Count ?? 0,
+            var value when string.Equals(value, ApplicationState.TransactionImportDataKey, StringComparison.Ordinal) =>
+                (LocalStorageService.Deserialize<TransactionImportData>(json)?.ImportedExpenseCategorySuggestions.Count ?? 0) +
+                (LocalStorageService.Deserialize<TransactionImportData>(json)?.ImportBatches.Count ?? 0),
+            _ => CountJsonItems(json)
+        };
+    }
+
+    private int CountApplicationDataRecords(string json)
+    {
+        var data = LocalStorageService.Deserialize<ApplicationData>(json);
+        if (data is null)
+        {
+            return 0;
+        }
+
+        return data.Members.Count +
+               data.IncomeRecords.Count +
+               data.SalaryIncomePeriods.Count +
+               data.SubcategoryDefinitions.Count +
+               data.ExpenseRecords.Count +
+               data.Subscriptions.Count +
+               data.HousingDefinitions.Count +
+               data.HousingLoans.Count +
+               (data.HomeResidence is null ? 0 : 1) +
+               data.TransportDefinitions.Count +
+               data.TransportVehicles.Count +
+               data.TransportLoans.Count +
+               data.LoanInterestBindingPeriods.Count +
+               data.LoanAmortizationPlans.Count +
+               data.MonthlyBalances.Count +
+               data.ClosedMonths.Count +
+               data.TransportLeasingContracts.Count +
+               data.Credits.Count +
+               data.Debts.Count +
+               data.SavingsAccounts.Count +
+               data.SavingsReturnPeriods.Count +
+               data.SavingsBalanceAdjustments.Count +
+               data.SavingsGeneratedReturns.Count +
+               data.Savings.Count +
+               data.Assets.Count;
+    }
+
+    private static int CountJsonItems(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.ValueKind switch
+        {
+            JsonValueKind.Array => document.RootElement.GetArrayLength(),
+            JsonValueKind.Object => document.RootElement.EnumerateObject().Count(),
+            JsonValueKind.String => string.IsNullOrWhiteSpace(document.RootElement.GetString()) ? 0 : 1,
+            JsonValueKind.Null or JsonValueKind.Undefined => 0,
+            _ => 1
+        };
+    }
+
     private Severity GetSyncResultSeverity() =>
         latestSyncResult?.IsSuccess == true
             ? Severity.Success
@@ -788,6 +1074,162 @@
         return $"{megabytes:0.00} MB";
     }
 
+    private void ToggleApplicationDataSection(string key)
+    {
+        var isExpanded = ExpandedApplicationDataSections.TryGetValue(key, out var current) && current;
+        ExpandedApplicationDataSections[key] = !isExpanded;
+        RebuildApplicationDataSections();
+    }
+
+    private void RebuildApplicationDataSections()
+    {
+        var sections = new List<ApplicationDataSection>();
+        AddApplicationDataSections(sections, AppState.Data, typeof(ApplicationData), "ApplicationData", "ApplicationData", isRoot: true);
+
+        ApplicationDataSections = sections;
+    }
+
+    private void AddApplicationDataSections(List<ApplicationDataSection> sections, object? value, Type type, string key, string name, bool isRoot = false)
+    {
+        var properties = GetInspectableProperties(type);
+        var scalarProperties = properties.Where(property => IsSimpleType(property.PropertyType)).ToList();
+
+        if (isRoot)
+        {
+            if (scalarProperties.Count > 0)
+            {
+                sections.Add(new ApplicationDataSection(
+                    key,
+                    name,
+                    scalarProperties.Select(property => property.Name).ToList(),
+                    [
+                        new ApplicationDataRow(scalarProperties.Select(property => FormatPropertyValue(property.GetValue(value))).ToList())
+                    ],
+                    IsSectionExpanded(key)));
+            }
+        }
+        else if (TryGetCollectionElementType(type, out _))
+        {
+            var elementType = GetCollectionElementType(type);
+            var columns = GetInspectableProperties(elementType).Select(column => column.Name).ToList();
+            var rows = (value as System.Collections.IEnumerable)?.Cast<object>()
+                .Select(item => new ApplicationDataRow(GetInspectableProperties(elementType).Select(column => FormatPropertyValue(column.GetValue(item))).ToList()))
+                .ToList() ?? [];
+
+            sections.Add(new ApplicationDataSection(key, name, columns, rows, IsSectionExpanded(key)));
+        }
+        else
+        {
+            var columns = properties.Select(property => property.Name).ToList();
+            var rows = value is null
+                ? new List<ApplicationDataRow>()
+                : new List<ApplicationDataRow> { new(properties.Select(property => FormatPropertyValue(property.GetValue(value))).ToList()) };
+
+            sections.Add(new ApplicationDataSection(key, name, columns, rows, IsSectionExpanded(key)));
+        }
+
+        if (isRoot)
+        {
+            foreach (var property in properties.Where(property => !IsSimpleType(property.PropertyType)))
+            {
+                var propertyValue = property.GetValue(value);
+                AddApplicationDataSections(sections, propertyValue, property.PropertyType, property.Name, property.Name);
+            }
+
+            return;
+        }
+
+        var childType = TryGetCollectionElementType(type, out var collectionElementType)
+            ? collectionElementType
+            : type;
+
+        foreach (var property in GetInspectableProperties(childType).Where(property => !IsSimpleType(property.PropertyType)))
+        {
+            var childKey = $"{key}/{property.Name}";
+            var childName = $"{name}/{property.Name}";
+            AddApplicationDataSections(sections, null, property.PropertyType, childKey, childName);
+        }
+    }
+
+    private bool IsSectionExpanded(string key) =>
+        ExpandedApplicationDataSections.TryGetValue(key, out var isExpanded) && isExpanded;
+
+    private static IReadOnlyList<PropertyInfo> GetInspectableProperties(Type type) =>
+        type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
+            .OrderBy(property => property.MetadataToken)
+            .ToList();
+
+    private static bool TryGetCollectionElementType(Type type, out Type elementType)
+    {
+        elementType = null!;
+        if (type == typeof(string))
+        {
+            return false;
+        }
+
+        if (type.IsArray)
+        {
+            elementType = type.GetElementType()!;
+            return true;
+        }
+
+        if (!type.IsGenericType)
+        {
+            return false;
+        }
+
+        var genericDefinition = type.GetGenericTypeDefinition();
+        if (genericDefinition != typeof(List<>) && genericDefinition != typeof(IReadOnlyList<>))
+        {
+            return false;
+        }
+
+        elementType = type.GetGenericArguments()[0];
+        return true;
+    }
+
+    private static Type GetCollectionElementType(Type type)
+    {
+        _ = TryGetCollectionElementType(type, out var elementType);
+        return elementType;
+    }
+
+    private string FormatPropertyValue(object? value)
+    {
+        if (value is null)
+        {
+            return string.Empty;
+        }
+
+        return value switch
+        {
+            DateOnly date => date.ToString("yyyy-MM-dd"),
+            DateTime dateTime => dateTime.ToString("yyyy-MM-dd HH:mm:ss"),
+            DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("yyyy-MM-dd HH:mm:ss zzz"),
+            bool boolean => boolean ? "true" : "false",
+            IFormattable formattable when value is not Enum => formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+            _ when IsSimpleType(value.GetType()) => value.ToString() ?? string.Empty,
+            _ => LocalStorageService.Serialize(value)
+        };
+    }
+
+    private static bool IsSimpleType(Type type)
+    {
+        var targetType = Nullable.GetUnderlyingType(type) ?? type;
+
+        return targetType.IsPrimitive ||
+               targetType.IsEnum ||
+               targetType == typeof(string) ||
+               targetType == typeof(decimal) ||
+               targetType == typeof(Guid) ||
+               targetType == typeof(DateOnly) ||
+               targetType == typeof(DateTime) ||
+               targetType == typeof(DateTimeOffset) ||
+               targetType == typeof(TimeOnly) ||
+               targetType == typeof(TimeSpan);
+    }
+
     public void Dispose()
     {
         Localizer.Changed -= HandleChanged;
@@ -795,4 +1237,15 @@
         ApplicationLogService.Changed -= HandleChanged;
         SyncService.Changed -= HandleChanged;
     }
+
+    private sealed record ManagedLocalStorageFile(string Key, string Description);
+
+    private sealed record LocalStorageFileRow(string Key, string Description, int RecordCount, bool Exists);
+
+    private sealed record ApplicationDataSection(string Key, string Name, IReadOnlyList<string> Columns, IReadOnlyList<ApplicationDataRow> Rows, bool IsExpanded)
+    {
+        public int RowCount => Rows.Count;
+    }
+
+    private sealed record ApplicationDataRow(IReadOnlyList<string> Cells);
 }

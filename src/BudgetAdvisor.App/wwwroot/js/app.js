@@ -7,6 +7,9 @@ window.budgetAdvisor.storage = {
     load: function (key) {
         return window.localStorage.getItem(key);
     },
+    remove: function (key) {
+        window.localStorage.removeItem(key);
+    },
     getUsageBytes: function () {
         const encoder = new TextEncoder();
         let total = 0;
@@ -19,6 +22,29 @@ window.budgetAdvisor.storage = {
         }
 
         return total;
+    }
+};
+
+window.budgetAdvisor.cookies = {
+    set: function (name, value, days) {
+        const expires = new Date();
+        expires.setTime(expires.getTime() + ((days || 3650) * 24 * 60 * 60 * 1000));
+        document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; expires=${expires.toUTCString()}; path=/; SameSite=Lax`;
+    },
+    get: function (name) {
+        const prefix = `${encodeURIComponent(name)}=`;
+        const cookies = document.cookie ? document.cookie.split("; ") : [];
+
+        for (const cookie of cookies) {
+            if (cookie.startsWith(prefix)) {
+                return decodeURIComponent(cookie.substring(prefix.length));
+            }
+        }
+
+        return null;
+    },
+    remove: function (name) {
+        document.cookie = `${encodeURIComponent(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
     }
 };
 

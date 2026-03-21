@@ -354,6 +354,18 @@ a, .btn-link {
     display: block;
 }
 
+.bank-import-supported-banks {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    position: relative;
+    left: -1.25rem;
+    width: calc(100% + 1.25rem);
+}
+
 .bank-import-status-list {
     display: grid;
     gap: 0.45rem;

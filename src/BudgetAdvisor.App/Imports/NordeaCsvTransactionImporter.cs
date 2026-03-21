@@ -82,7 +82,7 @@ public sealed class NordeaCsvTransactionImporter : ITransactionImporter
             try
             {
                 var amount = ParseNordeaDecimal(columns[amountIndex]);
-                if (amount >= 0m)
+                if (amount == 0m)
                 {
                     continue;
                 }
@@ -95,7 +95,7 @@ public sealed class NordeaCsvTransactionImporter : ITransactionImporter
                 {
                     TransactionDate = transactionDate,
                     Description = string.IsNullOrWhiteSpace(description) ? "Transaction" : description,
-                    Amount = Math.Abs(amount),
+                    Amount = amount,
                     Balance = balance,
                     Currency = "SEK",
                     SourceBank = "Nordea",

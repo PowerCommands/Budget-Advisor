@@ -48,6 +48,24 @@ public sealed class LocalStorageService
         await _jsRuntime.InvokeVoidAsync("budgetAdvisor.storage.save", key, json);
     }
 
+    public async Task RemoveAsync(string key)
+    {
+        await _jsRuntime.InvokeVoidAsync("budgetAdvisor.storage.remove", key);
+    }
+
+    public async Task SetCookieAsync(string name, string value, int days = 3650)
+    {
+        await _jsRuntime.InvokeVoidAsync("budgetAdvisor.cookies.set", name, value, days);
+    }
+
+    public async Task<string?> GetCookieAsync(string name) =>
+        await _jsRuntime.InvokeAsync<string?>("budgetAdvisor.cookies.get", name);
+
+    public async Task RemoveCookieAsync(string name)
+    {
+        await _jsRuntime.InvokeVoidAsync("budgetAdvisor.cookies.remove", name);
+    }
+
     public Task<T?> RestoreAsync<T>(string json)
     {
         var value = Deserialize<T>(json);

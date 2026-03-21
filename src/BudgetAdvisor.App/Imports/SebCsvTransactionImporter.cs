@@ -82,7 +82,7 @@ public sealed class SebCsvTransactionImporter : ITransactionImporter
             try
             {
                 var amount = ParseSebDecimal(columns[amountIndex]);
-                if (amount >= 0m)
+                if (amount == 0m)
                 {
                     continue;
                 }
@@ -99,7 +99,7 @@ public sealed class SebCsvTransactionImporter : ITransactionImporter
                 {
                     TransactionDate = transactionDate,
                     Description = string.IsNullOrWhiteSpace(description) ? "Transaction" : description,
-                    Amount = Math.Abs(amount),
+                    Amount = amount,
                     Balance = balance,
                     Currency = "SEK",
                     SourceBank = "SEB",

@@ -101,7 +101,7 @@ public sealed class SwedbankCsvTransactionImporter : ITransactionImporter
             try
             {
                 var amount = decimal.Parse(columns[amountIndex], NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
-                if (amount >= 0m)
+                if (amount == 0m)
                 {
                     continue;
                 }
@@ -115,7 +115,7 @@ public sealed class SwedbankCsvTransactionImporter : ITransactionImporter
                 {
                     Description = string.IsNullOrWhiteSpace(description) ? "Transaction" : description,
                     TransactionDate = transactionDate,
-                    Amount = Math.Abs(amount),
+                    Amount = amount,
                     Balance = balance,
                     Currency = string.IsNullOrWhiteSpace(currency) ? null : currency,
                     SourceBank = "Swedbank",

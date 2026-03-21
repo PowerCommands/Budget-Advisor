@@ -2,7 +2,7 @@ using BudgetAdvisor.Domain.Enums;
 
 namespace BudgetAdvisor.Domain.Models;
 
-public sealed class ImportedExpenseDraft
+public sealed class ImportedTransactionDraft
 {
     public DateOnly Date { get; set; }
 
@@ -10,7 +10,7 @@ public sealed class ImportedExpenseDraft
 
     public DateOnly? EndDate { get; set; }
 
-    public decimal Amount { get; set; }
+    public decimal SignedAmount { get; set; }
 
     public bool IsRecurring { get; set; }
 
@@ -18,7 +18,7 @@ public sealed class ImportedExpenseDraft
 
     public int ImportOccurrence { get; set; }
 
-    public ExpenseCategory Category { get; set; }
+    public SubcategoryMainCategory MainCategory { get; set; }
 
     public string Subcategory { get; set; } = string.Empty;
 

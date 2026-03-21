@@ -5,8 +5,7 @@ namespace BudgetAdvisor.Services;
 
 public sealed class LocalizationService
 {
-    public const string LocalizationKey = "budget-advisor.localization";
-    public const string CurrentLanguageKey = "budget-advisor.localization.current-language";
+    public const string CurrentLanguageCookieName = "budget-advisor.language";
 
     private readonly HttpClient _httpClient;
     private readonly LocalStorageService _localStorageService;
@@ -35,16 +34,7 @@ public sealed class LocalizationService
         await LoadDefaultLanguageAsync("en");
         await LoadDefaultLanguageAsync("sv");
 
-        var storedSets = await _localStorageService.LoadAsync<List<LocalizationResourceSet>>(LocalizationKey);
-        if (storedSets is not null)
-        {
-            foreach (var set in storedSets.Where(set => !string.IsNullOrWhiteSpace(set.LanguageCode)))
-            {
-                _resources[set.LanguageCode] = set;
-            }
-        }
-
-        var storedLanguage = await _localStorageService.LoadAsync<string>(CurrentLanguageKey);
+        var storedLanguage = await _localStorageService.GetCookieAsync(CurrentLanguageCookieName);
         if (!string.IsNullOrWhiteSpace(storedLanguage) && _resources.ContainsKey(storedLanguage))
         {
             CurrentLanguage = storedLanguage;
@@ -53,7 +43,6 @@ public sealed class LocalizationService
         {
             CurrentLanguage = "en";
         }
-
         Changed?.Invoke();
     }
 
@@ -84,7 +73,7 @@ public sealed class LocalizationService
         }
 
         CurrentLanguage = languageCode;
-        await _localStorageService.SaveAsync(CurrentLanguageKey, CurrentLanguage);
+        await _localStorageService.SetCookieAsync(CurrentLanguageCookieName, CurrentLanguage);
         Changed?.Invoke();
     }
 
@@ -108,7 +97,6 @@ public sealed class LocalizationService
 
         resourceSet.Resources ??= [];
         _resources[resourceSet.LanguageCode] = resourceSet;
-        await PersistAsync();
         Changed?.Invoke();
     }
 
@@ -121,11 +109,6 @@ public sealed class LocalizationService
         {
             _resources[languageCode] = resourceSet;
         }
-    }
-
-    private async Task PersistAsync()
-    {
-        await _localStorageService.SaveAsync(LocalizationKey, _resources.Values.OrderBy(set => set.LanguageCode).ToList());
     }
 
     private static string BuildExportFileName(string baseName) =>
