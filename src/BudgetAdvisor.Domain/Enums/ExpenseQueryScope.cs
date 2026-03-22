@@ -7,6 +7,5 @@ public enum ExpenseQueryScope
     Housing = 3,
     Transport = 4,
     Credits = 5,
-    Savings = 6,
-    Assets = 7
+    Savings = 6
 }

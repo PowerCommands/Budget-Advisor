@@ -1,0 +1,156 @@
+@page "/help"
+@implements IDisposable
+@inject LocalizationService Localizer
+
+<MudStack Spacing="3">
+    <div class="page-header">
+        <div>
+            <h1>@Localizer["help.title"]</h1>
+            <p>@Localizer["help.subtitle"]</p>
+        </div>
+    </div>
+
+    <section class="card-panel">
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h5">@Localizer["help.introductionTitle"]</MudText>
+            <MudText Typo="Typo.body1">@Localizer["help.introductionBody1"]</MudText>
+            <MudText Typo="Typo.body1">@Localizer["help.introductionBody2"]</MudText>
+            <MudText Typo="Typo.body1">@Localizer["help.introductionBody3"]</MudText>
+        </MudStack>
+    </section>
+
+    <section class="card-panel">
+        <MudStack Spacing="3">
+            <div>
+                <MudText Typo="Typo.h5">@Localizer["help.startingPointsTitle"]</MudText>
+                <MudText Typo="Typo.body2">@Localizer["help.startingPointsSubtitle"]</MudText>
+            </div>
+
+            <MudGrid Spacing="3">
+                @foreach (var item in StartingPointItems)
+                {
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="card-panel" Elevation="0">
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.h6">@item.Title</MudText>
+                                <MudText Typo="Typo.body2">@item.Body</MudText>
+                            </MudStack>
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
+        </MudStack>
+    </section>
+
+    <section class="card-panel">
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h5">@Localizer["help.workflowTitle"]</MudText>
+            <MudText Typo="Typo.body2">@Localizer["help.workflowSubtitle"]</MudText>
+            <ol class="help-list">
+                @foreach (var step in WorkflowSteps)
+                {
+                    <li>@step</li>
+                }
+            </ol>
+        </MudStack>
+    </section>
+
+    <section class="card-panel">
+        <MudStack Spacing="3">
+            <div>
+                <MudText Typo="Typo.h5">@Localizer["help.tabsTitle"]</MudText>
+                <MudText Typo="Typo.body2">@Localizer["help.tabsSubtitle"]</MudText>
+            </div>
+
+            <MudGrid Spacing="3">
+                @foreach (var tab in MainTabItems)
+                {
+                    <MudItem xs="12" md="6">
+                        <MudPaper Class="card-panel" Elevation="0">
+                            <MudStack Spacing="1">
+                                <MudText Typo="Typo.h6">@tab.Title</MudText>
+                                <MudText Typo="Typo.body2">@tab.Body</MudText>
+                            </MudStack>
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
+        </MudStack>
+    </section>
+
+    <section class="card-panel">
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h5">@Localizer["help.recurringTitle"]</MudText>
+            <MudText Typo="Typo.body1">@Localizer["help.recurringBody1"]</MudText>
+            <MudText Typo="Typo.body1">@Localizer["help.recurringBody2"]</MudText>
+        </MudStack>
+    </section>
+
+    <section class="card-panel">
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h5">@Localizer["help.philosophyTitle"]</MudText>
+            <MudText Typo="Typo.body1">@Localizer["help.philosophyBody1"]</MudText>
+            <MudText Typo="Typo.body1">@Localizer["help.philosophyBody2"]</MudText>
+        </MudStack>
+    </section>
+</MudStack>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Localizer.Changed += HandleChanged;
+    }
+
+    private IReadOnlyList<HelpItem> StartingPointItems =>
+    [
+        new(Localizer["help.startPoint1Title"], Localizer["help.startPoint1Body"]),
+        new(Localizer["help.startPoint2Title"], Localizer["help.startPoint2Body"]),
+        new(Localizer["help.startPoint3Title"], Localizer["help.startPoint3Body"]),
+        new(Localizer["help.startPoint4Title"], Localizer["help.startPoint4Body"])
+    ];
+
+    private IReadOnlyList<string> WorkflowSteps =>
+    [
+        Localizer["help.workflowStep1"],
+        Localizer["help.workflowStep2"],
+        Localizer["help.workflowStep3"],
+        Localizer["help.workflowStep4"],
+        Localizer["help.workflowStep5"],
+        Localizer["help.workflowStep6"],
+        Localizer["help.workflowStep7"]
+    ];
+
+    private IReadOnlyList<HelpItem> MainTabItems =>
+    [
+        new(Localizer["nav.start"], Localizer["help.tab.start"]),
+        new(Localizer["nav.analysis"], Localizer["help.tab.analysis"]),
+        new(Localizer["nav.household"], Localizer["help.tab.household"]),
+        new(Localizer["nav.housingTab"], Localizer["help.tab.housing"]),
+        new(Localizer["nav.transport"], Localizer["help.tab.transport"]),
+        new(Localizer["nav.expenses"], Localizer["help.tab.expenses"]),
+        new(Localizer["nav.credits"], Localizer["help.tab.credits"]),
+        new(Localizer["nav.savings"], Localizer["help.tab.savings"]),
+        new(Localizer["nav.import"], Localizer["help.tab.import"]),
+        new(Localizer["nav.settings"], Localizer["help.tab.settings"])
+    ];
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Localizer.Changed -= HandleChanged;
+    }
+
+    private sealed record HelpItem(string Title, string Body);
+}
+
+<style>
+    .help-list {
+        margin: 0;
+        padding-left: 1.25rem;
+    }
+
+    .help-list li + li {
+        margin-top: 0.5rem;
+    }
+</style>

@@ -78,6 +78,16 @@ window.budgetAdvisor.files = {
     }
 };
 
+window.budgetAdvisor.clipboard = {
+    copyText: async function (text) {
+        if (!navigator.clipboard || !navigator.clipboard.writeText) {
+            throw new Error("Clipboard API is not available.");
+        }
+
+        await navigator.clipboard.writeText(text || "");
+    }
+};
+
 window.budgetAdvisor.dropbox = {
     connect: async function (clientId, callbackPath) {
         if (!clientId || !clientId.trim()) {

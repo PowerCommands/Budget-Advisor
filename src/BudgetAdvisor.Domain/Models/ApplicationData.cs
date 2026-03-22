@@ -12,10 +12,14 @@ public sealed class ApplicationData
     public string ThemeMode { get; set; } = AppThemeNames.Standard;
     public int UpcomingExpensesMonths { get; set; } = 3;
     public decimal? UpcomingExpensesMinimumAmount { get; set; }
+    public bool UseSavingsToBalanceBudgetWidget { get; set; }
+    public List<DashboardKeyMetricPreference> DashboardKeyMetricPreferences { get; set; } = [];
 
     public List<HouseholdMember> Members { get; set; } = [];
 
     public List<IncomeEntry> IncomeRecords { get; set; } = [];
+
+    public List<SwishContact> SwishContacts { get; set; } = [];
 
     public List<SalaryIncomePeriod> SalaryIncomePeriods { get; set; } = [];
 
@@ -62,6 +66,4 @@ public sealed class ApplicationData
     public List<SavingsGeneratedReturn> SavingsGeneratedReturns { get; set; } = [];
 
     public List<SavingsItem> Savings { get; set; } = [];
-
-    public List<AssetItem> Assets { get; set; } = [];
 }

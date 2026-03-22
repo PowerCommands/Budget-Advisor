@@ -6,6 +6,8 @@ public sealed class ExpenseEntry
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    public Guid? MemberId { get; set; }
+
     public decimal Amount { get; set; }
 
     public int Year { get; set; }
@@ -45,8 +47,6 @@ public sealed class ExpenseEntry
     public Guid? CreditId { get; set; }
 
     public Guid? SavingsAccountId { get; set; }
-
-    public Guid? AssetId { get; set; }
 
     public CreditCostSource? CreditCostSource { get; set; }
 

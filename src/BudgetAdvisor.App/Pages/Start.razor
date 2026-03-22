@@ -11,8 +11,16 @@
 
 <section class="card-panel">
     <div class="section-title-row">
-        <h2>@Localizer["start.latestMonth"]</h2>
-        <span class="section-note">@GetBudgetNote()</span>
+        <div>
+            <h2>@Localizer["start.latestMonth"]</h2>
+            <span class="section-note">@GetBudgetNote()</span>
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                       Size="Size.Small"
+                       Color="Color.Default"
+                       aria-label="@Localizer["start.budgetWidgetSettingsTitle"]"
+                       title="@Localizer["start.budgetWidgetSettingsTitle"]"
+                       OnClick="HandleOpenBudgetWidgetSettingsAsync" />
     </div>
 
     <div class="stats-grid">
@@ -21,31 +29,38 @@
         <div class="stat-card"><span>@Localizer["reporting.food"]</span><strong>@AppState.FormatCurrency(budgetOverview.Food)</strong></div>
         <div class="stat-card"><span>@Localizer["reporting.transport"]</span><strong>@AppState.FormatCurrency(budgetOverview.Transport)</strong></div>
         <div class="stat-card"><span>@Localizer["reporting.clothing"]</span><strong>@AppState.FormatCurrency(budgetOverview.Clothing)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.savings"]</span><strong>@AppState.FormatCurrency(budgetOverview.Savings)</strong></div>
+        <div class="stat-card"><span>@GetBudgetSavingsLabel()</span><strong>@AppState.FormatCurrency(GetBudgetWidgetValues().Savings)</strong></div>
         <div class="stat-card"><span>@Localizer["reporting.other"]</span><strong>@AppState.FormatCurrency(budgetOverview.Other)</strong></div>
         <div class="stat-card"><span>@Localizer["reporting.credits"]</span><strong>@AppState.FormatCurrency(budgetOverview.Credits)</strong></div>
         <div class="@GetBalanceCardClass()">
-            <span>@Localizer["table.balance"]</span>
-            <strong>@AppState.FormatCurrency(budgetOverview.NetChange)</strong>
+            <span>@GetBudgetBalanceLabel()</span>
+            <strong>@AppState.FormatCurrency(GetBudgetWidgetValues().Balance)</strong>
         </div>
     </div>
 </section>
 
 <section class="card-panel mt-4">
     <div class="section-title-row">
-        <h2>@Localizer["start.keyMetrics"]</h2>
-        <span class="section-note">@GetMonthLabel(DateTime.Today.Year, DateTime.Today.Month)</span>
+        <div>
+            <h2>@Localizer["start.keyMetrics"]</h2>
+            <span class="section-note">@GetMonthLabel(DateTime.Today.Year, DateTime.Today.Month)</span>
+        </div>
+        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                       Size="Size.Small"
+                       Color="Color.Default"
+                       aria-label="@Localizer["start.keyMetricsWidgetSettingsTitle"]"
+                       title="@Localizer["start.keyMetricsWidgetSettingsTitle"]"
+                       OnClick="HandleOpenKeyMetricsWidgetSettingsAsync" />
     </div>
 
     <div class="stats-grid">
-        <div class="stat-card"><span>@Localizer["metrics.loanToValueRatio"]</span><strong>@FormatPercentage(keyMetrics.LoanToValueRatio)</strong></div>
-        <div class="stat-card"><span>@Localizer["table.housingLoans"]</span><strong>@AppState.FormatCurrency(keyMetrics.HousingLoans)</strong></div>
-        <div class="stat-card"><span>@Localizer["metrics.propertyValue"]</span><strong>@AppState.FormatCurrency(keyMetrics.PropertyValue)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.credits"]</span><strong>@AppState.FormatCurrency(keyMetrics.Credits)</strong></div>
-        <div class="stat-card"><span>@Localizer["reporting.savings"]</span><strong>@AppState.FormatCurrency(keyMetrics.Savings)</strong></div>
-        <div class="stat-card"><span>@Localizer["table.interest"]</span><strong>@AppState.FormatCurrency(keyMetrics.Interest)</strong></div>
-        <div class="stat-card"><span>@Localizer["table.amortization"]</span><strong>@AppState.FormatCurrency(keyMetrics.Amortization)</strong></div>
-        <div class="stat-card"><span>@Localizer["table.balance"]</span><strong>@AppState.FormatCurrency(keyMetrics.Balance)</strong></div>
+        @foreach (var metric in GetVisibleKeyMetricCards())
+        {
+            <div class="stat-card" @key="metric.Key">
+                <span>@metric.Label</span>
+                <strong class="metric-value-text">@metric.Value</strong>
+            </div>
+        }
     </div>
 </section>
 
@@ -276,7 +291,7 @@
     }
 
     private string GetBalanceCardClass()
-        => $"stat-card stat-card-balance-{GetBalanceVariant(budgetOverview.Income, budgetOverview.NetChange)}";
+        => $"stat-card stat-card-balance-{GetBalanceVariant(budgetOverview.Income, GetBudgetWidgetValues().Balance)}";
 
     private string GetReportBalanceCellClass(MonthlyReportRow row)
         => $"report-balance-cell report-balance-{GetBalanceVariant(row.Income, row.Balance)}";
@@ -304,6 +319,146 @@
 
     private static string FormatPercentage(decimal value) => $"{value:P1}";
 
+    private BudgetWidgetValues GetBudgetWidgetValues()
+    {
+        if (!AppState.Data.UseSavingsToBalanceBudgetWidget)
+        {
+            return new BudgetWidgetValues(budgetOverview.Savings, budgetOverview.NetChange);
+        }
+
+        if (budgetOverview.NetChange > 0m)
+        {
+            return new BudgetWidgetValues(
+                budgetOverview.Savings + budgetOverview.NetChange,
+                0m);
+        }
+
+        if (budgetOverview.NetChange < 0m)
+        {
+            var savingsReduction = Math.Min(budgetOverview.Savings, Math.Abs(budgetOverview.NetChange));
+            return new BudgetWidgetValues(
+                budgetOverview.Savings - savingsReduction,
+                budgetOverview.NetChange + savingsReduction);
+        }
+
+        return new BudgetWidgetValues(budgetOverview.Savings, 0m);
+    }
+
+    private string GetBudgetSavingsLabel() =>
+        AppState.Data.UseSavingsToBalanceBudgetWidget
+            ? Localizer["start.weightedSavings"]
+            : Localizer["reporting.savings"];
+
+    private string GetBudgetBalanceLabel() =>
+        AppState.Data.UseSavingsToBalanceBudgetWidget
+            ? Localizer["start.weightedBalance"]
+            : Localizer["table.balance"];
+
+    private IReadOnlyList<KeyMetricCard> GetVisibleKeyMetricCards() =>
+        AppState.Data.DashboardKeyMetricPreferences
+            .Where(preference => preference.IsVisible)
+            .Select(MapKeyMetricCard)
+            .ToList();
+
+    private async Task HandleOpenBudgetWidgetSettingsAsync()
+    {
+        var parameters = new DialogParameters<BudgetWidgetSettingsDialog>
+        {
+            { dialog => dialog.UseSavingsToBalance, AppState.Data.UseSavingsToBalanceBudgetWidget }
+        };
+
+        var dialog = await DialogService.ShowAsync<BudgetWidgetSettingsDialog>(Localizer["start.budgetWidgetSettingsTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result?.Data is not bool useSavingsToBalance)
+        {
+            return;
+        }
+
+        await AppState.SetUseSavingsToBalanceBudgetWidgetAsync(useSavingsToBalance);
+    }
+
+    private async Task HandleOpenKeyMetricsWidgetSettingsAsync()
+    {
+        var parameters = new DialogParameters<KeyMetricsWidgetSettingsDialog>
+        {
+            {
+                dialog => dialog.Preferences,
+                AppState.Data.DashboardKeyMetricPreferences
+                    .Select(preference => new DashboardKeyMetricPreference
+                    {
+                        Key = preference.Key,
+                        IsVisible = preference.IsVisible
+                    })
+                    .ToList()
+            }
+        };
+
+        var dialog = await DialogService.ShowAsync<KeyMetricsWidgetSettingsDialog>(Localizer["start.keyMetricsWidgetSettingsTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        if (result?.Data is not IReadOnlyList<DashboardKeyMetricPreference> preferences)
+        {
+            return;
+        }
+
+        await AppState.SetDashboardKeyMetricPreferencesAsync(preferences);
+    }
+
+    private KeyMetricCard MapKeyMetricCard(DashboardKeyMetricPreference preference) => preference.Key switch
+    {
+        DashboardKeyMetricPreference.LoanToValueRatioKey => new(preference.Key, Localizer["metrics.loanToValueRatio"], FormatPercentage(keyMetrics.LoanToValueRatio)),
+        DashboardKeyMetricPreference.HousingLoansKey => new(preference.Key, Localizer["metrics.housingLoansTotal"], AppState.FormatCurrency(keyMetrics.HousingLoans)),
+        DashboardKeyMetricPreference.PropertyValueKey => new(preference.Key, Localizer["metrics.propertyValue"], AppState.FormatCurrency(keyMetrics.PropertyValue)),
+        DashboardKeyMetricPreference.CreditsKey => new(preference.Key, Localizer["start.currentMonthCredits"], AppState.FormatCurrency(keyMetrics.Credits)),
+        DashboardKeyMetricPreference.SavingsKey => new(preference.Key, Localizer["metrics.savingsTotal"], AppState.FormatCurrency(keyMetrics.Savings)),
+        DashboardKeyMetricPreference.InterestKey => new(preference.Key, Localizer["metrics.interestMonth"], AppState.FormatCurrency(keyMetrics.Interest)),
+        DashboardKeyMetricPreference.AmortizationKey => new(preference.Key, Localizer["metrics.amortizationMonth"], AppState.FormatCurrency(keyMetrics.Amortization)),
+        DashboardKeyMetricPreference.BalanceKey => new(preference.Key, Localizer["metrics.savingsMinusLoans"], AppState.FormatCurrency(keyMetrics.Balance)),
+        DashboardKeyMetricPreference.LeasingKey => new(preference.Key, GetLeasingMetricLabel(), GetLeasingMetricValue()),
+        DashboardKeyMetricPreference.AverageSalaryKey => new(preference.Key, Localizer["metrics.averageSalary"], AppState.FormatCurrency(keyMetrics.AverageSalary)),
+        DashboardKeyMetricPreference.AverageElectricityKey => new(preference.Key, Localizer["metrics.electricity"], AppState.FormatCurrency(keyMetrics.AverageElectricity)),
+        DashboardKeyMetricPreference.AverageFuelKey => new(preference.Key, Localizer["metrics.fuel"], AppState.FormatCurrency(keyMetrics.AverageFuel)),
+        DashboardKeyMetricPreference.AverageInsuranceKey => new(preference.Key, Localizer["metrics.insurance"], AppState.FormatCurrency(keyMetrics.AverageInsurance)),
+        _ => new(preference.Key, preference.Key, string.Empty)
+    };
+
+    private string GetLeasingMetricLabel()
+    {
+        var vehicleName = keyMetrics.LeasingVehicleName?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(vehicleName)
+            ? Localizer["metrics.leasing"]
+            : $"{Localizer["metrics.leasing"]} {vehicleName}";
+    }
+
+    private string GetLeasingMetricValue()
+    {
+        if (!keyMetrics.LeasingEndYear.HasValue || !keyMetrics.LeasingEndMonth.HasValue)
+        {
+            return keyMetrics.LeasingMonthsRemaining.ToString();
+        }
+
+        return $"{keyMetrics.LeasingEndYear:0000}/{keyMetrics.LeasingEndMonth:00} ({keyMetrics.LeasingMonthsRemaining})";
+    }
+
     private string GetBudgetNote()
     {
         if (budgetOverview.ClosedMonthCount == 0 ||
@@ -328,7 +483,11 @@
         AppState.Changed -= Reload;
         Localizer.Changed -= Reload;
     }
+
+    private sealed record BudgetWidgetValues(decimal Savings, decimal Balance);
+    private sealed record KeyMetricCard(string Key, string Label, string Value);
 }
+
 
 <style>
     .report-actions-header {

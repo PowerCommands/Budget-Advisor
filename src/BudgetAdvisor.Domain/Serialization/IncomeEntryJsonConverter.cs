@@ -25,7 +25,6 @@ public sealed class IncomeEntryJsonConverter : JsonConverter<IncomeEntry>
             Type = ReadType(root),
             Metadata = TryGetString(root, nameof(IncomeEntry.Metadata)),
             SavingsAccountId = TryGetGuid(root, nameof(IncomeEntry.SavingsAccountId)),
-            AssetId = TryGetGuid(root, nameof(IncomeEntry.AssetId)),
             SeriesId = TryGetGuid(root, nameof(IncomeEntry.SeriesId))
         };
 
@@ -78,15 +77,6 @@ public sealed class IncomeEntryJsonConverter : JsonConverter<IncomeEntry>
         else
         {
             writer.WriteNull(nameof(IncomeEntry.SavingsAccountId));
-        }
-
-        if (value.AssetId.HasValue)
-        {
-            writer.WriteString(nameof(IncomeEntry.AssetId), value.AssetId.Value);
-        }
-        else
-        {
-            writer.WriteNull(nameof(IncomeEntry.AssetId));
         }
 
         if (value.SeriesId.HasValue)

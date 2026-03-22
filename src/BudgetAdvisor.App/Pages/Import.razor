@@ -1,0 +1,316 @@
+@page "/import"
+@using System.Text
+@using BudgetAdvisor.App.Imports
+@using Microsoft.AspNetCore.Components.Forms
+@implements IDisposable
+@inject ApplicationState AppState
+@inject TransactionImportService ImportService
+@inject IDialogService DialogService
+@inject LocalizationService Localizer
+
+@if (!string.IsNullOrWhiteSpace(statusMessage))
+{
+    <div class="status-banner">@statusMessage</div>
+}
+
+<section class="card-panel">
+    <div class="d-flex flex-column align-items-start gap-3">
+        <MudButton HtmlTag="label"
+                   Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.UploadFile">
+            @Localizer["expenses.import.uploadFile"]
+            <InputFile OnChange="HandleSwedbankFileSelectedAsync" accept=".csv,text/csv" hidden />
+        </MudButton>
+
+        <div class="d-flex flex-column gap-2 align-self-stretch w-100">
+            <span class="section-note d-block">@Localizer["expenses.import.supportedBanks"]</span>
+            <div class="bank-import-supported-banks">
+                <img src="images/import-swedbank.svg" alt="Swedbank" class="bank-import-provider-logo" />
+                <img src="images/import-nordea.svg" alt="Nordea" class="bank-import-provider-logo" />
+                <img src="images/import-seb.svg" alt="SEB" class="bank-import-provider-logo" />
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="card-panel mt-4">
+    <div class="section-title-row">
+        <h2>@Localizer["expenses.import.logTitle"]</h2>
+    </div>
+
+    @if (isAssigningImportMember && assigningImportMemberTotalCount > 0)
+    {
+        <div class="mb-3">
+            <MudProgressLinear Value="@ImportMemberAssignmentProgressValue"
+                               Color="Color.Primary"
+                               Rounded="true"
+                               Size="Size.Large" />
+            <div class="d-flex justify-content-between align-items-center mt-2">
+                <span>@string.Format(Localizer["expenses.import.memberUpdateProgress"], assigningImportMemberProcessedCount, assigningImportMemberTotalCount)</span>
+                <span>@($"{ImportMemberAssignmentProgressValue:0}%")</span>
+            </div>
+        </div>
+    }
+
+    <div class="table-responsive">
+        <table class="table app-table">
+            <thead>
+                <tr>
+                    <th>@Localizer["field.date"]</th>
+                    <th>@Localizer["field.records"]</th>
+                    <th>@Localizer["field.member"]</th>
+                    <th>@Localizer["field.actions"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (TransactionImportBatches.Count == 0)
+                {
+                    <tr>
+                        <td colspan="4">@Localizer["expenses.import.noImportLogEntries"]</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var importBatch in TransactionImportBatches)
+                    {
+                        <tr>
+                            <td>@FormatImportTimestamp(importBatch.ImportedAtUtc)</td>
+                            <td>@importBatch.ImportedRecordCount</td>
+                            <td>
+                                <div class="button-row income-action-row">
+                                    <button class="btn btn-outline-secondary btn-sm member-initial-button"
+                                            title="@Localizer["expenses.import.noMember"]"
+                                            disabled="@(isAssigningImportMember || !importBatch.MemberId.HasValue)"
+                                            @onclick="() => HandleAssignImportMemberAsync(importBatch, null)">
+                                        -
+                                    </button>
+                                    @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                                    {
+                                        <button class="btn btn-outline-primary btn-sm member-initial-button"
+                                                title="@member.Name"
+                                                disabled="@(isAssigningImportMember || importBatch.MemberId == member.Id)"
+                                                @onclick="() => HandleAssignImportMemberAsync(importBatch, member.Id)">
+                                            @GetMemberInitials(member)
+                                        </button>
+                                    }
+                                </div>
+                            </td>
+                            <td>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Color="Color.Error"
+                                               Size="Size.Small"
+                                               title="@Localizer["expenses.import.deleteImport"]"
+                                               aria-label="@Localizer["expenses.import.deleteImport"]"
+                                               Disabled="@isAssigningImportMember"
+                                               OnClick="@(() => HandleDeleteImportAsync(importBatch))" />
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</section>
+
+@code {
+    private string? statusMessage;
+    private bool isAssigningImportMember;
+    private int assigningImportMemberProcessedCount;
+    private int assigningImportMemberTotalCount;
+    private const int ImportMemberProgressBatchSize = 25;
+
+    private IReadOnlyList<TransactionImportBatch> TransactionImportBatches =>
+        AppState.TransactionImportData.ImportBatches
+            .OrderByDescending(batch => batch.ImportedAtUtc)
+            .ToList();
+
+    private double ImportMemberAssignmentProgressValue =>
+        assigningImportMemberTotalCount == 0
+            ? 0
+            : assigningImportMemberProcessedCount * 100d / assigningImportMemberTotalCount;
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += HandleChanged;
+        Localizer.Changed += HandleChanged;
+    }
+
+    private async Task HandleSwedbankFileSelectedAsync(InputFileChangeEventArgs args)
+    {
+        statusMessage = null;
+
+        try
+        {
+            var fileContent = await ReadFileAsync(args.File);
+
+            var parameters = new DialogParameters<BankImportPreviewDialog>
+            {
+                { dialog => dialog.FileContent, fileContent }
+            };
+
+            var options = new DialogOptions
+            {
+                MaxWidth = MaxWidth.False,
+                FullWidth = true
+            };
+
+            var dialog = await DialogService.ShowAsync<BankImportPreviewDialog>(Localizer["expenses.import.previewTitle"], parameters, options);
+            if (dialog is null)
+            {
+                return;
+            }
+
+            var result = await dialog.Result;
+            if (result?.Canceled ?? true)
+            {
+                return;
+            }
+
+            if (result.Data is not int importedCount || importedCount == 0)
+            {
+                statusMessage = Localizer["expenses.import.validation.noRowsSelected"];
+                return;
+            }
+
+            statusMessage = string.Format(Localizer["expenses.import.completed"], importedCount);
+        }
+        catch (TransactionImportException exception)
+        {
+            statusMessage = exception.Message;
+        }
+        catch (IOException)
+        {
+            statusMessage = Localizer["expenses.import.readError"];
+        }
+    }
+
+    private async Task HandleDeleteImportAsync(TransactionImportBatch importBatch)
+    {
+        var relatedRecordCount = AppState.Data.ExpenseRecords.Count(expense => expense.ImportId == importBatch.ImportId) +
+                                 AppState.Data.IncomeRecords.Count(income => income.ImportId == importBatch.ImportId);
+
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["expenses.import.deleteImportTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["expenses.import.deleteImportMessage"], relatedRecordCount) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["expenses.import.deleteImportTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        var removedRecordCount = await AppState.RemoveTransactionImportAsync(importBatch.ImportId);
+        statusMessage = string.Format(Localizer["expenses.import.deletedImport"], removedRecordCount);
+    }
+
+    private async Task HandleAssignImportMemberAsync(TransactionImportBatch importBatch, Guid? memberId)
+    {
+        if (isAssigningImportMember)
+        {
+            return;
+        }
+
+        isAssigningImportMember = true;
+        assigningImportMemberProcessedCount = 0;
+        assigningImportMemberTotalCount =
+            AppState.Data.IncomeRecords.Count(income => income.ImportId == importBatch.ImportId) +
+            AppState.Data.ExpenseRecords.Count(expense => expense.ImportId == importBatch.ImportId);
+        statusMessage = null;
+
+        var progress = new Progress<(int ProcessedCount, int TotalCount)>(update =>
+        {
+            assigningImportMemberProcessedCount = update.ProcessedCount;
+            assigningImportMemberTotalCount = update.TotalCount;
+            _ = InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            await AppState.SetTransactionImportMemberAsync(importBatch.ImportId, memberId, progress, ImportMemberProgressBatchSize);
+            statusMessage = string.Format(
+                Localizer["expenses.import.memberUpdated"],
+                GetImportMemberName(memberId),
+                FormatImportTimestamp(importBatch.ImportedAtUtc));
+        }
+        finally
+        {
+            isAssigningImportMember = false;
+            assigningImportMemberProcessedCount = 0;
+            assigningImportMemberTotalCount = 0;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string FormatImportTimestamp(DateTime timestampUtc) =>
+        timestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    private string GetImportMemberName(Guid? memberId) =>
+        memberId.HasValue
+            ? AppState.Data.Members.FirstOrDefault(member => member.Id == memberId.Value)?.Name ?? Localizer["common.unknown"]
+            : Localizer["expenses.import.noMember"];
+
+    private static string GetMemberInitials(HouseholdMember member)
+    {
+        var initials = member.Initials?.Trim() ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(initials))
+        {
+            return initials;
+        }
+
+        var name = member.Name?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(name)
+            ? "?"
+            : new string(name
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Take(2)
+                .Select(part => char.ToUpperInvariant(part[0]))
+                .ToArray());
+    }
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AppState.Changed -= HandleChanged;
+        Localizer.Changed -= HandleChanged;
+    }
+
+    private static async Task<string> ReadFileAsync(IBrowserFile file)
+    {
+        await using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+        await using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream);
+
+        var bytes = memoryStream.ToArray();
+        return DecodeFileContent(bytes);
+    }
+
+    private static string DecodeFileContent(byte[] bytes)
+    {
+        if (bytes.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
+        var utf8Content = utf8.GetString(bytes);
+        if (!utf8Content.Contains('\uFFFD'))
+        {
+            return utf8Content;
+        }
+
+        return Encoding.Latin1.GetString(bytes);
+    }
+}

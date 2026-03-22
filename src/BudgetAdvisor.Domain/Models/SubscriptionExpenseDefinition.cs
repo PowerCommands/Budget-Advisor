@@ -6,6 +6,8 @@ public sealed class SubscriptionExpenseDefinition
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    public Guid? MemberId { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     public decimal Amount { get; set; }

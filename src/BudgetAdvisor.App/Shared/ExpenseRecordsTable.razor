@@ -13,7 +13,7 @@
 
             @if (ShowAllCostsToggle)
             {
-                <div class="d-flex align-items-center gap-3 flex-wrap">
+                <div class="d-flex align-items-center gap-3 flex-wrap w-100">
                     <label class="form-check-label d-flex align-items-center gap-2">
                         <InputCheckbox class="form-check-input mt-0" Value="IncludeAllCosts" ValueChanged="HandleIncludeAllCostsChanged" ValueExpression="() => IncludeAllCosts" />
                         <span>@Localizer["filter.showAllCosts"]</span>
@@ -23,6 +23,7 @@
                         <MudButton Variant="Variant.Outlined"
                                    Color="Color.Error"
                                    StartIcon="@Icons.Material.Filled.DeleteSweep"
+                                   Class="ms-auto"
                                    Disabled="@(FilteredEntries.Count == 0)"
                                    OnClick="HandleDeleteFilteredAsync">
                             @Localizer["action.deleteAll"]
@@ -38,16 +39,19 @@
             <label class="form-label">@Localizer["filter.name"]</label>
             <InputText class="form-control" @bind-Value="filter.Name" />
         </div>
-        <div>
-            <label class="form-label">@Localizer["field.category"]</label>
-            <InputSelect class="form-select" @bind-Value="filter.CategoryFilter">
-                <option value="">@Localizer["filter.allCategories"]</option>
-                @foreach (var option in CategoryOptions)
-                {
-                    <option value="@option.Value">@Localizer[$"expenseCategory.{option.Category}"]</option>
-                }
-            </InputSelect>
-        </div>
+        @if (ShowCategoryFilter)
+        {
+            <div>
+                <label class="form-label">@Localizer["field.category"]</label>
+                <InputSelect class="form-select" @bind-Value="filter.CategoryFilter">
+                    <option value="">@Localizer["filter.allCategories"]</option>
+                    @foreach (var option in CategoryOptions)
+                    {
+                        <option value="@option.Value">@Localizer[$"expenseCategory.{option.Category}"]</option>
+                    }
+                </InputSelect>
+            </div>
+        }
         <div>
             <label class="form-label">@Localizer["field.subcategory"]</label>
             <InputSelect class="form-select" @bind-Value="filter.SubcategoryFilter">
@@ -158,6 +162,12 @@
     [Parameter]
     public bool DefaultToCurrentMonth { get; set; }
 
+    [Parameter]
+    public bool ShowCategoryFilter { get; set; } = true;
+
+    [Parameter]
+    public bool UseScopedDateRangeForShowAllCosts { get; set; }
+
     private IReadOnlyList<ExpenseEntry> FilteredEntries => AppState.GetFilteredExpenseEntries(filter);
     private decimal FilteredTotal => FilteredEntries.Sum(entry => entry.Amount);
 
@@ -200,6 +210,14 @@
     {
         filter.CategoryFilter = string.Empty;
         filter.SubcategoryFilter = string.Empty;
+        IncludeAllCosts = includeAllCosts;
+
+        if (UseScopedDateRangeForShowAllCosts)
+        {
+            ApplyShowAllDateRange(includeAllCosts);
+            await PersistDateFiltersAsync();
+        }
+
         await IncludeAllCostsChanged.InvokeAsync(includeAllCosts);
     }
 
@@ -214,12 +232,19 @@
     }
 
     private ExpenseQueryScope ResolveScope() =>
-        ShowAllCostsToggle && IncludeAllCosts
+        ShowAllCostsToggle && IncludeAllCosts && !UseScopedDateRangeForShowAllCosts
             ? ExpenseQueryScope.All
             : Scope;
 
     private void ApplyDefaultDateRange()
     {
+        if (UseScopedDateRangeForShowAllCosts && IncludeAllCosts)
+        {
+            ApplyShowAllDateRange(true);
+            defaultDateRangeApplied = true;
+            return;
+        }
+
         if (!DefaultToCurrentMonth || defaultDateRangeApplied || filter.StartDate.HasValue || filter.EndDate.HasValue)
         {
             return;
@@ -230,6 +255,39 @@
         filter.StartDate = currentMonth;
         filter.EndDate = currentMonth;
         defaultDateRangeApplied = true;
+    }
+
+    private void ApplyShowAllDateRange(bool includeAllCosts)
+    {
+        if (!includeAllCosts)
+        {
+            if (DefaultToCurrentMonth)
+            {
+                var today = DateOnly.FromDateTime(DateTime.Today);
+                var currentMonth = new DateOnly(today.Year, today.Month, 1);
+                filter.StartDate = currentMonth;
+                filter.EndDate = currentMonth;
+            }
+
+            return;
+        }
+
+        var scopeFilter = new ExpenseTableFilter { Scope = Scope };
+        var scopedEntries = AppState.GetFilteredExpenseEntries(scopeFilter);
+        if (scopedEntries.Count == 0)
+        {
+            filter.StartDate = null;
+            filter.EndDate = null;
+            return;
+        }
+
+        var orderedEntries = scopedEntries
+            .Select(entry => new DateOnly(entry.Year, entry.Month, 1))
+            .OrderBy(date => date)
+            .ToList();
+
+        filter.StartDate = orderedEntries.First();
+        filter.EndDate = orderedEntries.Last();
     }
 
     private async Task LoadPersistedDateFiltersAsync()

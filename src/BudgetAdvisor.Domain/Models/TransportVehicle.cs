@@ -21,6 +21,4 @@ public sealed class TransportVehicle
     public decimal? PurchasePrice { get; set; }
 
     public decimal? EstimatedSaleValue { get; set; }
-
-    public Guid? AssetId { get; set; }
 }

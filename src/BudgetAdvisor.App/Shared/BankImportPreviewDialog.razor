@@ -207,8 +207,25 @@
         }
     </DialogContent>
     <DialogActions>
-        <MudButton Variant="Variant.Text" OnClick="Cancel" Disabled="@IsBusy">@Localizer["action.cancel"]</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitAsync" Disabled="@IsBusy">@Localizer["action.import"]</MudButton>
+        <div class="bank-import-dialog-actions">
+            <div class="bank-import-member-select">
+                <label class="form-label mb-1">@Localizer["field.member"]</label>
+                <InputSelect class="form-select"
+                             @bind-Value="selectedMemberId"
+                             disabled="@IsBusy">
+                    <option value="">@Localizer["expenses.import.noMember"]</option>
+                    @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                    {
+                        <option value="@member.Id">@member.Name</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="button-row">
+                <MudButton Variant="Variant.Text" OnClick="Cancel" Disabled="@IsBusy">@Localizer["action.cancel"]</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SubmitAsync" Disabled="@IsBusy">@Localizer["action.import"]</MudButton>
+            </div>
+        </div>
     </DialogActions>
 </MudDialog>
 
@@ -234,6 +251,19 @@
 
     .bank-import-apply-button {
         white-space: nowrap;
+    }
+
+    .bank-import-dialog-actions {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .bank-import-member-select {
+        min-width: min(18rem, 100%);
     }
 
     @@media (max-width: 899px) {
@@ -287,6 +317,7 @@
     private int totalTransactionCount;
     private int totalSelectedCount;
     private int importedCount;
+    private Guid? selectedMemberId;
 
     private bool HasApplySuggestionHistory => AppState.TransactionImportData.ImportedExpenseCategorySuggestions.Count > 0;
     private bool HasImportedMatches => rows.Any(row => row.IsAlreadyImported);
@@ -392,6 +423,7 @@
         {
             var draft = new ImportedTransactionDraft
             {
+                MemberId = selectedMemberId,
                 Date = row.TransactionDate,
                 StartDate = row.StartDate.HasValue ? DateOnly.FromDateTime(row.StartDate.Value) : null,
                 EndDate = row.EndDate.HasValue ? DateOnly.FromDateTime(row.EndDate.Value) : null,
@@ -417,7 +449,7 @@
             }
         }
 
-        await AppState.RecordTransactionImportBatchAsync(importId, importedCount);
+        await AppState.RecordTransactionImportBatchAsync(importId, importedCount, selectedMemberId);
         await AppState.SaveImportedExpenseCategorySuggestionsAsync(importedSuggestions);
         MudDialog.Close(DialogResult.Ok(importedCount));
     }

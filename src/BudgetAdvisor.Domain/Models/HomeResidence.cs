@@ -13,6 +13,4 @@ public sealed class HomeResidence
     public decimal? PurchasePrice { get; set; }
 
     public decimal? CurrentMarketValue { get; set; }
-
-    public Guid? AssetId { get; set; }
 }

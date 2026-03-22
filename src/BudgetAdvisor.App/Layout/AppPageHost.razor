@@ -61,10 +61,17 @@ else
             </div>
         }
 
-        @if (visitedPageKeys.Contains(AssetsPageKey))
+        @if (visitedPageKeys.Contains(ImportPageKey))
         {
-            <div class="@GetPagePanelClass(AssetsPageKey)">
-                <Assets />
+            <div class="@GetPagePanelClass(ImportPageKey)">
+                <Import />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(AnalysisPageKey))
+        {
+            <div class="@GetPagePanelClass(AnalysisPageKey)">
+                <Analysis />
             </div>
         }
 
@@ -72,6 +79,13 @@ else
         {
             <div class="@GetPagePanelClass(SettingsPageKey)">
                 <Tools />
+            </div>
+        }
+
+        @if (visitedPageKeys.Contains(HelpPageKey))
+        {
+            <div class="@GetPagePanelClass(HelpPageKey)">
+                <Help />
             </div>
         }
     </div>
@@ -85,8 +99,10 @@ else
     private const string ExpensesPageKey = "expenses";
     private const string CreditsPageKey = "credits";
     private const string SavingsPageKey = "savings";
-    private const string AssetsPageKey = "assets";
+    private const string ImportPageKey = "import";
+    private const string AnalysisPageKey = "analysis";
     private const string SettingsPageKey = "settings";
+    private const string HelpPageKey = "help";
     private const string NotFoundPageKey = "not-found";
 
     private readonly HashSet<string> visitedPageKeys = [];
@@ -111,8 +127,10 @@ else
             ExpensesPageKey => Localizer["nav.expenses"],
             CreditsPageKey => Localizer["nav.credits"],
             SavingsPageKey => Localizer["nav.savings"],
-            AssetsPageKey => Localizer["nav.assets"],
+            ImportPageKey => Localizer["nav.import"],
+            AnalysisPageKey => Localizer["nav.analysis"],
             SettingsPageKey => Localizer["nav.settings"],
+            HelpPageKey => Localizer["nav.help"],
             _ => Localizer["common.notFound"]
         };
 
@@ -142,8 +160,10 @@ else
             "expenses" => ExpensesPageKey,
             "credits" or "debts" => CreditsPageKey,
             "savings" => SavingsPageKey,
-            "assets" => AssetsPageKey,
+            "import" => ImportPageKey,
+            "analysis" => AnalysisPageKey,
             "tools" or "settings" => SettingsPageKey,
+            "help" => HelpPageKey,
             _ => NotFoundPageKey
         };
     }

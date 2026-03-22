@@ -1,0 +1,90 @@
+@inject LocalizationService Localizer
+
+<WidgetSettingsDialogShell Title="@Localizer["start.keyMetricsWidgetSettingsTitle"]"
+                           SaveText="@Localizer["action.save"]"
+                           CancelText="@Localizer["action.cancel"]"
+                           SaveResult="@metricPreferences">
+    <div class="widget-setting-row">
+        @foreach (var item in metricPreferences.Select((preference, index) => new { preference, index }))
+        {
+            <div class="key-metric-setting-row">
+                <label class="widget-setting-checkbox">
+                    <InputCheckbox class="form-check-input" @bind-Value="item.preference.IsVisible" />
+                    <span>@GetMetricLabel(item.preference.Key)</span>
+                </label>
+                <div class="button-row">
+                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp"
+                                   Size="Size.Small"
+                                   Disabled="@(item.index == 0)"
+                                   aria-label="@Localizer["action.moveUp"]"
+                                   title="@Localizer["action.moveUp"]"
+                                   OnClick="@(() => MoveMetric(item.index, -1))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown"
+                                   Size="Size.Small"
+                                   Disabled="@(item.index == metricPreferences.Count - 1)"
+                                   aria-label="@Localizer["action.moveDown"]"
+                                   title="@Localizer["action.moveDown"]"
+                                   OnClick="@(() => MoveMetric(item.index, 1))" />
+                </div>
+            </div>
+        }
+    </div>
+</WidgetSettingsDialogShell>
+
+@code {
+    [Parameter]
+    public IReadOnlyList<DashboardKeyMetricPreference> Preferences { get; set; } = [];
+
+    private List<DashboardKeyMetricPreference> metricPreferences = [];
+
+    protected override void OnInitialized()
+    {
+        metricPreferences = Preferences
+            .Select(preference => new DashboardKeyMetricPreference
+            {
+                Key = preference.Key,
+                IsVisible = preference.IsVisible
+            })
+            .ToList();
+    }
+
+    private void MoveMetric(int index, int direction)
+    {
+        var targetIndex = index + direction;
+        if (index < 0 || index >= metricPreferences.Count || targetIndex < 0 || targetIndex >= metricPreferences.Count)
+        {
+            return;
+        }
+
+        (metricPreferences[index], metricPreferences[targetIndex]) = (metricPreferences[targetIndex], metricPreferences[index]);
+    }
+
+    private string GetMetricLabel(string key) => key switch
+    {
+        DashboardKeyMetricPreference.LoanToValueRatioKey => Localizer["metrics.loanToValueRatio"],
+        DashboardKeyMetricPreference.HousingLoansKey => Localizer["metrics.housingLoansTotal"],
+        DashboardKeyMetricPreference.PropertyValueKey => Localizer["metrics.propertyValue"],
+        DashboardKeyMetricPreference.CreditsKey => Localizer["start.currentMonthCredits"],
+        DashboardKeyMetricPreference.SavingsKey => Localizer["metrics.savingsTotal"],
+        DashboardKeyMetricPreference.InterestKey => Localizer["metrics.interestMonth"],
+        DashboardKeyMetricPreference.AmortizationKey => Localizer["metrics.amortizationMonth"],
+        DashboardKeyMetricPreference.BalanceKey => Localizer["metrics.savingsMinusLoans"],
+        DashboardKeyMetricPreference.LeasingKey => Localizer["metrics.leasing"],
+        DashboardKeyMetricPreference.AverageSalaryKey => Localizer["metrics.averageSalary"],
+        DashboardKeyMetricPreference.AverageElectricityKey => Localizer["metrics.electricity"],
+        DashboardKeyMetricPreference.AverageFuelKey => Localizer["metrics.fuel"],
+        DashboardKeyMetricPreference.AverageInsuranceKey => Localizer["metrics.insurance"],
+        _ => key
+    };
+}
+
+<style>
+    .key-metric-setting-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 0.35rem 0;
+        flex-wrap: wrap;
+    }
+</style>

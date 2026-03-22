@@ -4,6 +4,8 @@ namespace BudgetAdvisor.Domain.Models;
 
 public sealed class ImportedExpenseDraft
 {
+    public Guid? MemberId { get; set; }
+
     public DateOnly Date { get; set; }
 
     public DateOnly? StartDate { get; set; }

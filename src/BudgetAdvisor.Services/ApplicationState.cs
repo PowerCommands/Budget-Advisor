@@ -2,6 +2,7 @@ using BudgetAdvisor.Domain.Enums;
 using BudgetAdvisor.Domain.Models;
 using BudgetAdvisor.Services.Extensions;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 using BudgetAdvisor.Domain.Theming;
 
@@ -19,12 +20,10 @@ public sealed class ApplicationState
     private const string InterestSubcategory = "Interest";
     private const string AmortizationSubcategory = "Amortization";
     private const string LeasingSubcategory = "Leasing";
-    private const string AssetSaleSubcategory = "Asset Sale";
     private const string UnspecifiedSubcategory = "Unspecified";
     private const string CreditMetadata = "Credit";
-    private const string VehicleAssetType = "Vehicle";
-    private const string HousingAssetType = "Housing";
     private const string DefaultSavingsAccountName = "Savings";
+    private static readonly Regex SwishPhoneRegex = new(@"\+46\d{9}", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly LocalStorageService _localStorageService;
     private readonly LocalizationService _localizer;
@@ -91,26 +90,41 @@ public sealed class ApplicationState
     {
         ArgumentNullException.ThrowIfNull(filter);
 
+        if (filter.Scope == ExpenseQueryScope.Housing)
+        {
+            return GetExpenseSubcategorySuggestions(ExpenseCategory.Housing);
+        }
+
+        if (filter.Scope == ExpenseQueryScope.Transport)
+        {
+            return GetExpenseSubcategorySuggestions(ExpenseCategory.Transport);
+        }
+
         return ApplyExpenseTableFilter(GetScopedExpenseEntries(filter.Scope), filter, includeCategoryFilter: true, includeSubcategoryFilter: false)
-            .Select(entry => entry.Subcategory.Trim())
+            .Select(entry => GetLocalizedExpenseLabel(entry.Subcategory))
             .Where(subcategory => !string.IsNullOrWhiteSpace(subcategory))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(subcategory => subcategory, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
     }
 
-    public async Task AddMemberAsync(string name)
+    public async Task AddMemberAsync(string name, string initials)
     {
         var memberName = name.Trim();
-        Data.Members.Add(new HouseholdMember { Name = memberName });
+        var memberInitials = NormalizeMemberInitials(initials);
+        Data.Members.Add(new HouseholdMember
+        {
+            Name = memberName,
+            Initials = memberInitials
+        });
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.household"], _localizer["household.membersTab"]),
             BuildLogActivity("log.verb.added", "log.entity.member", memberName));
     }
 
-    public async Task AddOneTimeIncomeAsync(Guid memberId, decimal amount, int year, int month, string type, string? metadata = null, Guid? savingsAccountId = null, Guid? assetId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null)
+    public async Task AddOneTimeIncomeAsync(Guid memberId, decimal amount, int year, int month, string type, string? metadata = null, Guid? savingsAccountId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null)
     {
-        Data.IncomeRecords.Add(CreateOneTimeIncomeEntry(memberId, amount, year, month, NormalizeSystemIncomeType(type), metadata, savingsAccountId, assetId, transactionDate, importId, importOccurrence));
+        Data.IncomeRecords.Add(CreateOneTimeIncomeEntry(memberId, amount, year, month, NormalizeSystemIncomeType(type), metadata, savingsAccountId, transactionDate, importId, importOccurrence));
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.household"], _localizer["household.incomesTab"]),
@@ -211,15 +225,6 @@ public sealed class ApplicationState
 
         income.Amount = amount;
 
-        if (income.AssetId.HasValue)
-        {
-            var asset = Data.Assets.FirstOrDefault(item => item.Id == income.AssetId.Value && item.SaleIncomeEntryId == income.Id);
-            if (asset is not null)
-            {
-                asset.SaleAmount = amount;
-            }
-        }
-
         if (income.SavingsAccountId.HasValue)
         {
             await RecalculateSavingsBalancesAsync();
@@ -235,9 +240,83 @@ public sealed class ApplicationState
         return true;
     }
 
-    public async Task AddOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null)
+    public async Task<bool> UpdateIncomeMemberAsync(Guid incomeId, Guid memberId)
     {
-        _ = AddOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId, transactionDate, importId, importOccurrence);
+        var member = GetMember(memberId);
+        var income = Data.IncomeRecords.FirstOrDefault(entry => entry.Id == incomeId);
+        if (income is null)
+        {
+            return false;
+        }
+
+        if (income.MemberId == memberId)
+        {
+            return false;
+        }
+
+        if (income.SeriesId.HasValue)
+        {
+            foreach (var seriesIncome in Data.IncomeRecords.Where(entry => entry.SeriesId == income.SeriesId).ToList())
+            {
+                seriesIncome.MemberId = memberId;
+            }
+
+            var salaryPeriod = Data.SalaryIncomePeriods.FirstOrDefault(period => period.SeriesId == income.SeriesId.Value);
+            if (salaryPeriod is not null)
+            {
+                salaryPeriod.MemberId = memberId;
+                salaryPeriod.MemberName = member.Name;
+            }
+        }
+        else
+        {
+            income.MemberId = memberId;
+        }
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.incomesTab"]),
+            BuildLogActivity("log.verb.updated", "log.entity.income", $"{member.Name} / {GetIncomeTypeDisplay(income.Type)}"));
+        return true;
+    }
+
+    public async Task<bool> UpdateMemberAsync(Guid memberId, string name, string initials)
+    {
+        var member = Data.Members.FirstOrDefault(item => item.Id == memberId);
+        if (member is null)
+        {
+            return false;
+        }
+
+        var normalizedName = name.Trim();
+        var normalizedInitials = NormalizeMemberInitials(initials);
+        if (string.IsNullOrWhiteSpace(normalizedName) || string.IsNullOrWhiteSpace(normalizedInitials))
+        {
+            return false;
+        }
+
+        if (string.Equals(member.Name, normalizedName, StringComparison.Ordinal) &&
+            string.Equals(member.Initials, normalizedInitials, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        member.Name = normalizedName;
+        member.Initials = normalizedInitials;
+
+        foreach (var salaryPeriod in Data.SalaryIncomePeriods.Where(period => period.MemberId == memberId))
+        {
+            salaryPeriod.MemberName = normalizedName;
+        }
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.household"], _localizer["household.membersTab"]),
+            BuildLogActivity("log.verb.updated", "log.entity.member", normalizedName));
+        return true;
+    }
+
+    public async Task AddOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null, Guid? memberId = null)
+    {
+        _ = AddOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, transactionDate, importId, importOccurrence, memberId);
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
@@ -263,6 +342,7 @@ public sealed class ApplicationState
             var startDate = draft.StartDate ?? draft.Date;
             Data.Subscriptions.Add(new SubscriptionExpenseDefinition
             {
+                MemberId = NormalizeOptionalMemberId(draft.MemberId),
                 Name = draft.Description.Trim(),
                 Amount = draft.Amount,
                 IntervalMonths = 1,
@@ -294,9 +374,9 @@ public sealed class ApplicationState
             null,
             null,
             null,
-            null,
             draft.ImportId,
-            draft.ImportOccurrence));
+            draft.ImportOccurrence,
+            draft.MemberId));
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
@@ -317,7 +397,7 @@ public sealed class ApplicationState
 
         if (draft.MainCategory == SubcategoryMainCategory.Income)
         {
-            await AddOneTimeIncomeAsync(Guid.Empty, absoluteAmount, draft.Date.Year, draft.Date.Month, normalizedSubcategory, normalizedDescription, transactionDate: draft.Date, importId: draft.ImportId, importOccurrence: draft.ImportOccurrence);
+            await AddOneTimeIncomeAsync(draft.MemberId ?? Guid.Empty, absoluteAmount, draft.Date.Year, draft.Date.Month, normalizedSubcategory, normalizedDescription, transactionDate: draft.Date, importId: draft.ImportId, importOccurrence: draft.ImportOccurrence);
             return;
         }
 
@@ -333,7 +413,8 @@ public sealed class ApplicationState
             Subcategory = normalizedSubcategory,
             Description = normalizedDescription,
             ImportId = draft.ImportId,
-            ImportOccurrence = draft.ImportOccurrence
+            ImportOccurrence = draft.ImportOccurrence,
+            MemberId = draft.MemberId
         });
     }
 
@@ -676,13 +757,6 @@ public sealed class ApplicationState
             EstimatedSaleValue = ownershipType == VehicleOwnershipType.Private ? estimatedSaleValue : null
         };
 
-        if (vehicle.OwnershipType == VehicleOwnershipType.Private)
-        {
-            var asset = CreateTransportVehicleAsset(vehicle);
-            Data.Assets.Add(asset);
-            vehicle.AssetId = asset.Id;
-        }
-
         Data.TransportVehicles.Add(vehicle);
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.transport"], _localizer["transport.vehiclesTab"]),
@@ -876,124 +950,12 @@ public sealed class ApplicationState
             GetSavingsSubcategory(account.AccountType),
             account.AccountName,
             account.Id,
-            null,
             date));
 
         await RecalculateSavingsAccountBalancesAsync(account.Id, NormalizeMonth(date));
         await LogActivityAsync(
             BuildLogDescription(_localizer["nav.savings"], GetSavingsTabTitle(account.AccountType)),
             BuildLogActivity("log.verb.registered", "log.entity.withdrawal", account.AccountName));
-    }
-
-    public async Task AddAssetAsync(
-        string name,
-        string type,
-        string description,
-        decimal purchaseValue,
-        decimal estimatedSaleValue,
-        DateOnly acquisitionDate,
-        bool registerAsPurchase)
-    {
-        var asset = new AssetItem
-        {
-            Name = name.Trim(),
-            Type = type.Trim(),
-            Description = description.Trim(),
-            PurchaseValue = purchaseValue,
-            EstimatedSaleValue = estimatedSaleValue,
-            AcquisitionDate = acquisitionDate,
-            SourceType = AssetSourceType.Manual
-        };
-
-        Data.Assets.Add(asset);
-
-        if (registerAsPurchase)
-        {
-            Data.ExpenseRecords.Add(CreateOneTimeExpenseEntry(
-                purchaseValue,
-                acquisitionDate.Year,
-                acquisitionDate.Month,
-                ExpenseCategory.Assets,
-                asset.Type,
-                asset.Name,
-                acquisitionDate,
-                asset.Name,
-                null,
-                null,
-                asset.Id));
-        }
-
-        await PersistAndNotifyAndLogAsync(
-            BuildLogDescription(_localizer["nav.assets"]),
-            BuildLogActivity("log.verb.added", "log.entity.asset", asset.Name));
-    }
-
-    public async Task UpdateAssetAsync(
-        Guid assetId,
-        string name,
-        string type,
-        string description,
-        decimal purchaseValue,
-        decimal estimatedSaleValue,
-        DateOnly acquisitionDate)
-    {
-        var asset = GetAsset(assetId);
-        asset.Name = name.Trim();
-        asset.Type = type.Trim();
-        asset.Description = description.Trim();
-        asset.PurchaseValue = purchaseValue;
-        asset.EstimatedSaleValue = estimatedSaleValue;
-        asset.AcquisitionDate = acquisitionDate;
-
-        await PersistAndNotifyAndLogAsync(
-            BuildLogDescription(_localizer["nav.assets"]),
-            BuildLogActivity("log.verb.updated", "log.entity.asset", asset.Name));
-    }
-
-    public async Task SellAssetAsync(Guid assetId, DateOnly saleDate, decimal saleAmount, Guid? bankSavingsAccountId)
-    {
-        var asset = GetAsset(assetId);
-        if (asset.IsSold)
-        {
-            throw new InvalidOperationException("The asset has already been sold.");
-        }
-
-        if (saleAmount <= 0m)
-        {
-            throw new InvalidOperationException("Sale amount must be greater than zero.");
-        }
-
-        var incomeEntry = CreateOneTimeIncomeEntry(Guid.Empty, saleAmount, saleDate.Year, saleDate.Month, AssetSaleSubcategory, asset.Name, null, asset.Id, saleDate);
-        Data.IncomeRecords.Add(incomeEntry);
-
-        if (bankSavingsAccountId.HasValue)
-        {
-            var bankAccount = GetSavingsAccount(bankSavingsAccountId.Value);
-            if (bankAccount.AccountType != SavingsAccountType.Bank)
-            {
-                throw new InvalidOperationException("Direct deposit requires a bank savings account.");
-            }
-
-            Data.ExpenseRecords.Add(CreateSavingsDepositExpenseEntry(bankAccount, saleDate, saleAmount));
-        }
-
-        asset.IsSold = true;
-        asset.SaleDate = saleDate;
-        asset.SaleAmount = saleAmount;
-        asset.SaleIncomeEntryId = incomeEntry.Id;
-
-        if (bankSavingsAccountId.HasValue)
-        {
-            await RecalculateSavingsBalancesAsync();
-            await LogActivityAsync(
-                BuildLogDescription(_localizer["nav.assets"]),
-                BuildLogActivity("log.verb.updated", "log.entity.assetSale", asset.Name));
-            return;
-        }
-
-        await PersistAndNotifyAndLogAsync(
-            BuildLogDescription(_localizer["nav.assets"]),
-            BuildLogActivity("log.verb.updated", "log.entity.assetSale", asset.Name));
     }
 
     public async Task<int> CalculateSavingsReturnsAsync(DateOnly startDate, DateOnly endDate)
@@ -1098,11 +1060,8 @@ public sealed class ApplicationState
             ResidenceType = residenceType,
             PurchaseYear = isOwnedResidence ? purchaseYear : null,
             PurchasePrice = isOwnedResidence ? purchasePrice : null,
-            CurrentMarketValue = isOwnedResidence ? currentMarketValue : null,
-            AssetId = existingResidence?.AssetId
+            CurrentMarketValue = isOwnedResidence ? currentMarketValue : null
         };
-
-        SyncHomeResidenceAsset();
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.housingTab"], _localizer["housing.homeResidence"]),
@@ -1467,6 +1426,7 @@ public sealed class ApplicationState
 
                 Data.ExpenseRecords.Add(new ExpenseEntry
                 {
+                    MemberId = subscription.MemberId,
                     Amount = subscription.Amount,
                     Year = current.Year,
                     Month = current.Month,
@@ -1552,6 +1512,7 @@ public sealed class ApplicationState
     {
         var currentMonth = GetCurrentMonth().ToDateOnly();
         var previousMonth = currentMonth.AddMonths(-1);
+        var closedMonths = GetLatestClosedMonths(12);
         var housingLoans = GetHousingLoanDebtForMonth(currentMonth);
         var credits = GetCreditsDebtForMonth(currentMonth);
         var propertyValue = GetPropertyValueForMonth(currentMonth);
@@ -1560,6 +1521,20 @@ public sealed class ApplicationState
         var amortization = GetAmortizationCostsForMonth(currentMonth.Year, currentMonth.Month);
         var balance = CalculateBalanceForMonth(currentMonth);
         var previousBalance = CalculateBalanceForMonth(previousMonth);
+        var leasingMetric = GetActiveLeasingMetric(currentMonth);
+        var averageSalary = GetAverageIncomeForClosedMonths(closedMonths, income =>
+            string.Equals(NormalizeSystemIncomeType(income.Type), SalaryIncomeType, StringComparison.Ordinal));
+        var averageElectricity = GetAverageExpenseForClosedMonths(closedMonths, expense =>
+            expense.Category == ExpenseCategory.Housing &&
+            IsExpenseSubcategory(expense, SubcategoryMainCategory.Housing, "subcategory.housing.electricity"));
+        var averageFuel = GetAverageExpenseForClosedMonths(closedMonths, expense =>
+            expense.Category == ExpenseCategory.Transport &&
+            (IsExpenseSubcategory(expense, SubcategoryMainCategory.Transport, "subcategory.transport.electricity") ||
+             IsExpenseSubcategory(expense, SubcategoryMainCategory.Transport, "subcategory.transport.petrol") ||
+             IsExpenseSubcategory(expense, SubcategoryMainCategory.Transport, "subcategory.transport.gas") ||
+             IsExpenseSubcategory(expense, SubcategoryMainCategory.Transport, "subcategory.transport.diesel")));
+        var averageInsurance = GetAverageExpenseForClosedMonths(closedMonths, expense =>
+            ExpenseSubcategoryContainsInsurance(expense));
 
         return new DashboardKeyMetrics
         {
@@ -1571,6 +1546,14 @@ public sealed class ApplicationState
             Interest = interest,
             Amortization = amortization,
             Balance = balance,
+            LeasingMonthsRemaining = leasingMetric.MonthsRemaining,
+            LeasingVehicleName = leasingMetric.VehicleName,
+            LeasingEndYear = leasingMetric.EndYear,
+            LeasingEndMonth = leasingMetric.EndMonth,
+            AverageSalary = averageSalary,
+            AverageElectricity = averageElectricity,
+            AverageFuel = averageFuel,
+            AverageInsurance = averageInsurance,
             Change = balance - previousBalance
         };
     }
@@ -1712,6 +1695,17 @@ public sealed class ApplicationState
             : entry.Description.Trim();
     }
 
+    public string GetIncomeEntryDisplay(IncomeEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var typeLabel = GetIncomeTypeDisplay(entry.Type);
+
+        return string.IsNullOrWhiteSpace(entry.Metadata)
+            ? typeLabel
+            : $"{entry.Metadata} - {typeLabel}";
+    }
+
     public IReadOnlyList<string> GetExpenseSubcategorySuggestions(ExpenseCategory category) =>
         GetConfiguredSubcategorySuggestions(category)
             .Concat(Data.ExpenseRecords
@@ -1780,8 +1774,7 @@ public sealed class ApplicationState
         return entry.LoanId.HasValue ||
                entry.TransportLeasingContractId.HasValue ||
                entry.CreditId.HasValue ||
-               entry.SavingsAccountId.HasValue ||
-               entry.AssetId.HasValue;
+               entry.SavingsAccountId.HasValue;
     }
 
     public string GetExpenseMetadataDisplay(string? metadata)
@@ -1807,67 +1800,11 @@ public sealed class ApplicationState
             InheritanceIncomeType => _localizer["incomeType.Inheritance"],
             GiftIncomeType => _localizer["incomeType.Gift"],
             OtherIncomeType => _localizer["incomeType.Other"],
-            AssetSaleSubcategory => _localizer["assets.assetSale"],
             "Bank" => _localizer["savings.bankTab"],
             "Fund" => _localizer["savings.fundsTab"],
             "Stock" => _localizer["savings.stocksTab"],
             _ => type.Trim()
         };
-    }
-
-    public string GetAssetNameDisplay(AssetItem asset)
-    {
-        ArgumentNullException.ThrowIfNull(asset);
-
-        if (asset.SourceType == AssetSourceType.HomeResidence && Data.HomeResidence is not null && asset.HomeResidenceId == Data.HomeResidence.Id)
-        {
-            return GetHomeResidenceAssetNameDisplay(Data.HomeResidence);
-        }
-
-        return asset.Name;
-    }
-
-    public string GetAssetTypeDisplay(AssetItem asset)
-    {
-        ArgumentNullException.ThrowIfNull(asset);
-
-        if (asset.SourceType == AssetSourceType.HomeResidence && Data.HomeResidence is not null && asset.HomeResidenceId == Data.HomeResidence.Id)
-        {
-            return GetHomeResidenceAssetTypeDisplay(Data.HomeResidence);
-        }
-
-        if (asset.SourceType == AssetSourceType.TransportVehicle && string.Equals(asset.Type, VehicleAssetType, StringComparison.Ordinal))
-        {
-            return _localizer["transport.vehicle"];
-        }
-
-        return asset.Type;
-    }
-
-    public string GetAssetDescriptionDisplay(AssetItem asset)
-    {
-        ArgumentNullException.ThrowIfNull(asset);
-
-        if (asset.SourceType == AssetSourceType.HomeResidence && Data.HomeResidence is not null && asset.HomeResidenceId == Data.HomeResidence.Id)
-        {
-            return Data.HomeResidence.ResidenceType switch
-            {
-                HomeResidenceType.Condominium => $"{_localizer["housing.homeResidence"]} / {_localizer["housing.residenceType.condominium"]}",
-                HomeResidenceType.House => $"{_localizer["housing.homeResidence"]} / {_localizer["housing.residenceType.house"]}",
-                _ => _localizer["housing.homeResidence"]
-            };
-        }
-
-        if (asset.SourceType == AssetSourceType.TransportVehicle && asset.TransportVehicleId.HasValue)
-        {
-            var vehicle = Data.TransportVehicles.FirstOrDefault(item => item.Id == asset.TransportVehicleId.Value);
-            if (vehicle is not null)
-            {
-                return $"{vehicle.ModelYear} {_localizer[$"transport.vehicleType.{vehicle.VehicleType}"]} / {_localizer[$"transport.fuelType.{vehicle.FuelType}"]}";
-            }
-        }
-
-        return asset.Description;
     }
 
     public MonthlyOverview GetMonthlyOverview(int year, int month)
@@ -2053,6 +1990,33 @@ public sealed class ApplicationState
         await PersistAndNotifyAsync();
     }
 
+    public async Task SetUseSavingsToBalanceBudgetWidgetAsync(bool enabled)
+    {
+        if (Data.UseSavingsToBalanceBudgetWidget == enabled)
+        {
+            return;
+        }
+
+        Data.UseSavingsToBalanceBudgetWidget = enabled;
+        await PersistAndNotifyAsync();
+    }
+
+    public async Task SetDashboardKeyMetricPreferencesAsync(IEnumerable<DashboardKeyMetricPreference> preferences)
+    {
+        ArgumentNullException.ThrowIfNull(preferences);
+
+        Data.DashboardKeyMetricPreferences = preferences
+            .Select(preference => new DashboardKeyMetricPreference
+            {
+                Key = preference.Key?.Trim() ?? string.Empty,
+                IsVisible = preference.IsVisible
+            })
+            .ToList();
+
+        NormalizeDashboardKeyMetricPreferences();
+        await PersistAndNotifyAsync();
+    }
+
     public async Task SaveImportedExpenseCategorySuggestionsAsync(IEnumerable<ImportedExpenseCategorySuggestion> suggestions)
     {
         ArgumentNullException.ThrowIfNull(suggestions);
@@ -2099,17 +2063,24 @@ public sealed class ApplicationState
         await PersistTransactionImportDataAndNotifyAsync();
     }
 
-    public async Task RecordTransactionImportBatchAsync(Guid importId, int importedRecordCount)
+    public async Task RecordTransactionImportBatchAsync(Guid importId, int importedRecordCount, Guid? memberId = null)
     {
         if (importId == Guid.Empty || importedRecordCount <= 0)
         {
             return;
         }
 
+        var normalizedMemberId = NormalizeOptionalMemberId(memberId);
+        if (normalizedMemberId.HasValue)
+        {
+            _ = GetMember(normalizedMemberId.Value);
+        }
+
         TransactionImportData.ImportBatches.RemoveAll(batch => batch.ImportId == importId);
         TransactionImportData.ImportBatches.Add(new TransactionImportBatch
         {
             ImportId = importId,
+            MemberId = normalizedMemberId,
             ImportedAtUtc = DateTime.UtcNow,
             ImportedRecordCount = importedRecordCount
         });
@@ -2147,6 +2118,105 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.deleted", "log.entity.expense", importId.ToString()));
 
         return removedIncomeCount + removedExpenseCount;
+    }
+
+    public async Task<int> SetTransactionImportMemberAsync(Guid importId, Guid? memberId, IProgress<(int ProcessedCount, int TotalCount)>? progress = null, int progressBatchSize = 25)
+    {
+        if (importId == Guid.Empty)
+        {
+            return 0;
+        }
+
+        var normalizedMemberId = NormalizeOptionalMemberId(memberId);
+        if (normalizedMemberId.HasValue)
+        {
+            _ = GetMember(normalizedMemberId.Value);
+        }
+
+        var importedSubscriptions = Data.Subscriptions
+            .Where(subscription => subscription.ImportId == importId)
+            .ToList();
+
+        var importedExpenses = Data.ExpenseRecords
+            .Where(expense => expense.ImportId == importId)
+            .ToList();
+
+        var importedIncomes = Data.IncomeRecords
+            .Where(income => income.ImportId == importId)
+            .ToList();
+
+        var importBatches = TransactionImportData.ImportBatches
+            .Where(batch => batch.ImportId == importId)
+            .ToList();
+
+        var totalCount = importedExpenses.Count + importedIncomes.Count;
+        if (totalCount == 0)
+        {
+            progress?.Report((0, 0));
+        }
+
+        var processedCount = 0;
+        var updatedCount = 0;
+        var incomeMemberId = normalizedMemberId ?? Guid.Empty;
+
+        foreach (var income in importedIncomes)
+        {
+            if (income.MemberId != incomeMemberId)
+            {
+                income.MemberId = incomeMemberId;
+                updatedCount++;
+            }
+
+            processedCount++;
+            if (ShouldReportProgress(processedCount, totalCount, progressBatchSize))
+            {
+                progress?.Report((processedCount, totalCount));
+            }
+        }
+
+        foreach (var expense in importedExpenses)
+        {
+            if (expense.MemberId != normalizedMemberId)
+            {
+                expense.MemberId = normalizedMemberId;
+                updatedCount++;
+            }
+
+            processedCount++;
+            if (ShouldReportProgress(processedCount, totalCount, progressBatchSize))
+            {
+                progress?.Report((processedCount, totalCount));
+            }
+        }
+
+        foreach (var subscription in importedSubscriptions)
+        {
+            if (subscription.MemberId != normalizedMemberId)
+            {
+                subscription.MemberId = normalizedMemberId;
+                updatedCount++;
+            }
+        }
+
+        foreach (var importBatch in importBatches)
+        {
+            if (importBatch.MemberId != normalizedMemberId)
+            {
+                importBatch.MemberId = normalizedMemberId;
+                updatedCount++;
+            }
+        }
+
+        if (updatedCount == 0)
+        {
+            return 0;
+        }
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.importTab"]),
+            BuildLogActivity("log.verb.updated", "log.entity.member", normalizedMemberId.HasValue ? GetMemberNameOrUnknown(normalizedMemberId.Value) : importId.ToString()));
+
+        return updatedCount;
     }
 
     public async Task<DataPruningSummary> PruneDataAsync(DateOnly cutoffDate)
@@ -2199,6 +2269,125 @@ public sealed class ApplicationState
         }
 
         await PersistAndNotifyAsync();
+    }
+
+    public async Task<bool> RemoveTransferAsync(Guid incomeId, Guid expenseId)
+    {
+        var income = Data.IncomeRecords.FirstOrDefault(item => item.Id == incomeId);
+        var expense = Data.ExpenseRecords.FirstOrDefault(item => item.Id == expenseId);
+        if (income is null || expense is null)
+        {
+            return false;
+        }
+
+        Data.IncomeRecords.RemoveAll(item => item.Id == incomeId);
+        Data.ExpenseRecords.RemoveAll(item => item.Id == expenseId);
+
+        var requiresSavingsRecalculation = income.SavingsAccountId.HasValue || expense.SavingsAccountId.HasValue;
+        if (requiresSavingsRecalculation)
+        {
+            await RecalculateSavingsBalancesAsync();
+            await LogActivityAsync(
+                BuildLogDescription(_localizer["nav.analysis"], _localizer["analysis.transfersTab"]),
+                BuildLogActivity("log.verb.deleted", "log.entity.transfer", $"{GetIncomeEntryDisplay(income)} / {GetExpenseDescriptionDisplay(expense)}"));
+            return true;
+        }
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.analysis"], _localizer["analysis.transfersTab"]),
+            BuildLogActivity("log.verb.deleted", "log.entity.transfer", $"{GetIncomeEntryDisplay(income)} / {GetExpenseDescriptionDisplay(expense)}"));
+        return true;
+    }
+
+    public async Task SaveSwishContactNameAsync(string phoneNumber, string name)
+    {
+        var normalizedPhoneNumber = phoneNumber.Trim();
+        var normalizedName = name.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedPhoneNumber))
+        {
+            return;
+        }
+
+        var existingContact = Data.SwishContacts.FirstOrDefault(contact =>
+            string.Equals(contact.PhoneNumber, normalizedPhoneNumber, StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            if (existingContact is null)
+            {
+                return;
+            }
+
+            Data.SwishContacts.Remove(existingContact);
+            await PersistAndNotifyAsync();
+            return;
+        }
+
+        if (existingContact is null)
+        {
+            Data.SwishContacts.Add(new SwishContact
+            {
+                PhoneNumber = normalizedPhoneNumber,
+                Name = normalizedName
+            });
+
+            await PersistAndNotifyAsync();
+            return;
+        }
+
+        if (string.Equals(existingContact.Name, normalizedName, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        existingContact.Name = normalizedName;
+        await PersistAndNotifyAsync();
+    }
+
+    public async Task<bool> RemoveSwishContactAndTransactionsAsync(string phoneNumber)
+    {
+        var normalizedPhoneNumber = phoneNumber.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedPhoneNumber))
+        {
+            return false;
+        }
+
+        var removedContactCount = Data.SwishContacts.RemoveAll(contact =>
+            string.Equals(contact.PhoneNumber, normalizedPhoneNumber, StringComparison.OrdinalIgnoreCase));
+
+        var incomesToRemove = Data.IncomeRecords
+            .Where(income => SwishTransactionMatchesPhoneNumber(GetIncomeEntryDisplay(income), normalizedPhoneNumber))
+            .Select(income => income.Id)
+            .ToHashSet();
+
+        var expensesToRemove = Data.ExpenseRecords
+            .Where(expense => SwishTransactionMatchesPhoneNumber(GetExpenseDescriptionDisplay(expense), normalizedPhoneNumber))
+            .Select(expense => expense.Id)
+            .ToHashSet();
+
+        if (removedContactCount == 0 && incomesToRemove.Count == 0 && expensesToRemove.Count == 0)
+        {
+            return false;
+        }
+
+        var requiresSavingsRecalculation =
+            Data.IncomeRecords.Any(income => incomesToRemove.Contains(income.Id) && income.SavingsAccountId.HasValue) ||
+            Data.ExpenseRecords.Any(expense => expensesToRemove.Contains(expense.Id) && expense.SavingsAccountId.HasValue);
+
+        Data.IncomeRecords.RemoveAll(income => incomesToRemove.Contains(income.Id));
+        Data.ExpenseRecords.RemoveAll(expense => expensesToRemove.Contains(expense.Id));
+        Data.SalaryIncomePeriods.RemoveAll(period =>
+            period.SeriesId != Guid.Empty &&
+            !Data.IncomeRecords.Any(income => income.SeriesId == period.SeriesId));
+
+        if (requiresSavingsRecalculation)
+        {
+            await RecalculateSavingsBalancesAsync();
+            return true;
+        }
+
+        await PersistAndNotifyAsync();
+        return true;
     }
 
     public async Task RemoveExpensesAsync(IEnumerable<Guid> expenseIds)
@@ -2409,10 +2598,6 @@ public sealed class ApplicationState
         {
             throw new InvalidOperationException("The vehicle is still linked to transport records.");
         }
-
-        Data.Assets.RemoveAll(asset =>
-            asset.TransportVehicleId == vehicleId ||
-            (vehicle.AssetId.HasValue && asset.Id == vehicle.AssetId.Value));
 
         Data.TransportVehicles.RemoveAll(item => item.Id == vehicleId);
         await PersistAndNotifyAndLogAsync(
@@ -2639,10 +2824,56 @@ public sealed class ApplicationState
         }
     }
 
+    private void NormalizeDashboardKeyMetricPreferences()
+    {
+        Data.DashboardKeyMetricPreferences ??= [];
+
+        var normalizedPreferences = Data.DashboardKeyMetricPreferences
+            .Where(preference => !string.IsNullOrWhiteSpace(preference.Key))
+            .Select(preference => new DashboardKeyMetricPreference
+            {
+                Key = preference.Key.Trim(),
+                IsVisible = preference.IsVisible
+            })
+            .Where(preference => DashboardKeyMetricPreference.DefaultOrder.Contains(preference.Key, StringComparer.OrdinalIgnoreCase))
+            .GroupBy(preference => preference.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+
+        if (normalizedPreferences.Count == 0)
+        {
+            Data.DashboardKeyMetricPreferences = DashboardKeyMetricPreference.DefaultOrder
+                .Select(key => new DashboardKeyMetricPreference
+                {
+                    Key = key,
+                    IsVisible = true
+                })
+                .ToList();
+
+            return;
+        }
+
+        var missingKeys = DashboardKeyMetricPreference.DefaultOrder
+            .Where(defaultKey => normalizedPreferences.All(preference => !string.Equals(preference.Key, defaultKey, StringComparison.OrdinalIgnoreCase)));
+
+        foreach (var key in missingKeys)
+        {
+            normalizedPreferences.Add(new DashboardKeyMetricPreference
+            {
+                Key = key,
+                IsVisible = true
+            });
+        }
+
+        Data.DashboardKeyMetricPreferences = normalizedPreferences;
+    }
+
     private void NormalizeData()
     {
+        Data.DashboardKeyMetricPreferences ??= [];
         Data.Members ??= [];
         Data.IncomeRecords ??= [];
+        Data.SwishContacts ??= [];
         Data.SalaryIncomePeriods ??= [];
         Data.SubcategoryDefinitions ??= [];
         Data.ExpenseRecords ??= [];
@@ -2665,7 +2896,6 @@ public sealed class ApplicationState
         Data.SavingsBalanceAdjustments ??= [];
         Data.SavingsGeneratedReturns ??= [];
         Data.Savings ??= [];
-        Data.Assets ??= [];
 
         if (string.IsNullOrWhiteSpace(Data.CurrencyCode))
         {
@@ -2701,6 +2931,7 @@ public sealed class ApplicationState
         }
 
         NormalizeUpcomingExpensesPreferences();
+        NormalizeDashboardKeyMetricPreferences();
 
         foreach (var income in Data.IncomeRecords)
         {
@@ -2720,6 +2951,17 @@ public sealed class ApplicationState
                 : salaryPeriod.MemberName.Trim();
         }
 
+        Data.SwishContacts = Data.SwishContacts
+            .Where(contact => !string.IsNullOrWhiteSpace(contact.PhoneNumber))
+            .GroupBy(contact => contact.PhoneNumber.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => new SwishContact
+            {
+                PhoneNumber = group.Key,
+                Name = group.Select(contact => contact.Name?.Trim() ?? string.Empty).LastOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty
+            })
+            .OrderBy(contact => contact.PhoneNumber, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
         foreach (var loan in Data.HousingLoans)
         {
             loan.Name = string.IsNullOrWhiteSpace(loan.Name) ? loan.Lender : loan.Name.Trim();
@@ -2733,62 +2975,24 @@ public sealed class ApplicationState
 
         foreach (var expense in Data.ExpenseRecords)
         {
+            expense.MemberId = NormalizeOptionalMemberId(expense.MemberId);
             expense.Metadata ??= string.Empty;
             expense.ImportOccurrence = NormalizeImportOccurrence(expense.ImportOccurrence);
         }
 
         foreach (var subscription in Data.Subscriptions)
         {
+            subscription.MemberId = NormalizeOptionalMemberId(subscription.MemberId);
             subscription.ImportOccurrence = NormalizeImportOccurrence(subscription.ImportOccurrence);
         }
 
         NormalizeSubcategoryDefinitions();
         NormalizeClosedMonths();
 
-        foreach (var asset in Data.Assets)
-        {
-            asset.Name = asset.Name?.Trim() ?? string.Empty;
-            asset.Type = string.IsNullOrWhiteSpace(asset.Type)
-                ? asset.TransportVehicleId.HasValue ? VehicleAssetType : asset.HomeResidenceId.HasValue ? HousingAssetType : OtherIncomeType
-                : asset.Type.Trim();
-            asset.Description ??= string.Empty;
-
-            if (asset.PurchaseValue == 0m && asset.Amount > 0m)
-            {
-                asset.PurchaseValue = asset.Amount;
-            }
-
-            if (asset.Amount == 0m && asset.PurchaseValue > 0m)
-            {
-                asset.Amount = asset.PurchaseValue;
-            }
-
-            if (asset.EstimatedSaleValue == 0m && asset.PurchaseValue > 0m)
-            {
-                asset.EstimatedSaleValue = asset.PurchaseValue;
-            }
-
-            if (asset.AcquisitionDate == default)
-            {
-                asset.AcquisitionDate = DateOnly.FromDateTime(DateTime.Today);
-            }
-
-            if (asset.HomeResidenceId.HasValue)
-            {
-                asset.SourceType = AssetSourceType.HomeResidence;
-            }
-            else if (asset.TransportVehicleId.HasValue)
-            {
-                asset.SourceType = AssetSourceType.TransportVehicle;
-            }
-        }
-
         if (Data.HomeResidence is not null && Data.HomeResidence.Id == Guid.Empty)
         {
             Data.HomeResidence.Id = Guid.NewGuid();
         }
-
-        SyncHomeResidenceAssetInMemory();
 
         foreach (var credit in Data.Credits)
         {
@@ -3114,13 +3318,11 @@ public sealed class ApplicationState
             ExpenseQueryScope.Transport => Data.ExpenseRecords.Where(entry => entry.Category == ExpenseCategory.Transport),
             ExpenseQueryScope.Credits => Data.ExpenseRecords.Where(entry => entry.Category == ExpenseCategory.Credits),
             ExpenseQueryScope.Savings => Data.ExpenseRecords.Where(entry => entry.Category == ExpenseCategory.Savings),
-            ExpenseQueryScope.Assets => Data.ExpenseRecords.Where(entry => entry.Category == ExpenseCategory.Assets),
             ExpenseQueryScope.ExpensesOnly => Data.ExpenseRecords.Where(entry =>
                 entry.Category != ExpenseCategory.Housing &&
                 entry.Category != ExpenseCategory.Transport &&
                 entry.Category != ExpenseCategory.Credits &&
-                entry.Category != ExpenseCategory.Savings &&
-                entry.Category != ExpenseCategory.Assets),
+                entry.Category != ExpenseCategory.Savings),
             _ => Data.ExpenseRecords
         };
 
@@ -3167,7 +3369,9 @@ public sealed class ApplicationState
         if (includeSubcategoryFilter && !string.IsNullOrWhiteSpace(filter.SubcategoryFilter))
         {
             var subcategoryFilter = filter.SubcategoryFilter.Trim();
-            query = query.Where(entry => string.Equals(entry.Subcategory.Trim(), subcategoryFilter, StringComparison.OrdinalIgnoreCase));
+            query = query.Where(entry =>
+                string.Equals(entry.Subcategory.Trim(), subcategoryFilter, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(GetLocalizedExpenseLabel(entry.Subcategory), subcategoryFilter, StringComparison.CurrentCultureIgnoreCase));
         }
 
         return query;
@@ -3200,7 +3404,7 @@ public sealed class ApplicationState
     private static DateOnly NormalizeMonth(DateOnly date) => new(date.Year, date.Month, 1);
 
     private static bool ScopeUsesSubcategoryFilterOnly(ExpenseQueryScope scope) =>
-        scope is ExpenseQueryScope.Housing or ExpenseQueryScope.Transport or ExpenseQueryScope.Credits or ExpenseQueryScope.Savings or ExpenseQueryScope.Assets;
+        scope is ExpenseQueryScope.Housing or ExpenseQueryScope.Transport or ExpenseQueryScope.Credits or ExpenseQueryScope.Savings;
 
     private static string BuildCombinedCategoryFilterValue(ExpenseCategory category, string subcategory) =>
         $"{category}|{subcategory.Trim()}";
@@ -3569,10 +3773,6 @@ public sealed class ApplicationState
         Data.TransportVehicles.FirstOrDefault(item => item.Id == vehicleId)
         ?? throw new InvalidOperationException("The selected vehicle does not exist.");
 
-    private AssetItem GetAsset(Guid assetId) =>
-        Data.Assets.FirstOrDefault(item => item.Id == assetId)
-        ?? throw new InvalidOperationException("The selected asset does not exist.");
-
     private string GetTransportVehicleName(Guid? vehicleId)
     {
         if (!vehicleId.HasValue)
@@ -3593,7 +3793,7 @@ public sealed class ApplicationState
         return metadata?.Trim() ?? string.Empty;
     }
 
-    private IncomeEntry CreateOneTimeIncomeEntry(Guid memberId, decimal amount, int year, int month, string type, string? metadata, Guid? savingsAccountId, Guid? assetId, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null) => new()
+    private IncomeEntry CreateOneTimeIncomeEntry(Guid memberId, decimal amount, int year, int month, string type, string? metadata, Guid? savingsAccountId, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null) => new()
     {
         MemberId = memberId,
         Amount = amount,
@@ -3604,8 +3804,7 @@ public sealed class ApplicationState
         ImportOccurrence = NormalizeImportOccurrence(importOccurrence),
         Type = type.Trim(),
         Metadata = metadata?.Trim() ?? string.Empty,
-        SavingsAccountId = savingsAccountId,
-        AssetId = assetId
+        SavingsAccountId = savingsAccountId
     };
 
     private ExpenseEntry CreateOneTimeExpenseEntry(
@@ -3619,10 +3818,11 @@ public sealed class ApplicationState
         string? metadata,
         Guid? transportVehicleId,
         Guid? savingsAccountId,
-        Guid? assetId,
         Guid? importId = null,
-        int? importOccurrence = null) => new()
+        int? importOccurrence = null,
+        Guid? memberId = null) => new()
         {
+            MemberId = NormalizeOptionalMemberId(memberId),
             Amount = amount,
             Year = year,
             Month = month,
@@ -3634,8 +3834,7 @@ public sealed class ApplicationState
             Metadata = NormalizeExpenseMetadata(category, transportVehicleId, metadata),
             Description = description.Trim(),
             TransportVehicleId = category == ExpenseCategory.Transport ? transportVehicleId : null,
-            SavingsAccountId = category == ExpenseCategory.Savings ? savingsAccountId : null,
-            AssetId = category == ExpenseCategory.Assets ? assetId : null
+            SavingsAccountId = category == ExpenseCategory.Savings ? savingsAccountId : null
         };
 
     private ExpenseEntry CreateSavingsDepositExpenseEntry(SavingsAccount account, DateOnly date, decimal amount) =>
@@ -3649,129 +3848,7 @@ public sealed class ApplicationState
             date,
             account.AccountName,
             null,
-            account.Id,
-            null);
-
-    private static string BuildTransportVehicleAssetDescription(TransportVehicle vehicle) =>
-        $"{vehicle.ModelYear} {vehicle.VehicleType} / {vehicle.FuelType}";
-
-    private static string BuildHomeResidenceAssetName(HomeResidence residence) =>
-        residence.ResidenceType switch
-        {
-            HomeResidenceType.Condominium => "Home Condominium",
-            HomeResidenceType.House => "Home House",
-            _ => "Home Residence"
-        };
-
-    private static string BuildHomeResidenceAssetType(HomeResidence residence) =>
-        residence.ResidenceType switch
-        {
-            HomeResidenceType.Condominium => "Condominium",
-            HomeResidenceType.House => "House",
-            _ => "Housing"
-        };
-
-    private static string BuildHomeResidenceAssetDescription(HomeResidence residence) =>
-        residence.ResidenceType switch
-        {
-            HomeResidenceType.Condominium => "Primary home residence condominium",
-            HomeResidenceType.House => "Primary home residence house",
-            _ => "Primary home residence"
-        };
-
-    private AssetItem CreateTransportVehicleAsset(TransportVehicle vehicle) => new()
-    {
-        Name = vehicle.Name,
-        Type = "Vehicle",
-        Description = BuildTransportVehicleAssetDescription(vehicle),
-        PurchaseValue = vehicle.PurchasePrice ?? vehicle.EstimatedSaleValue ?? 0m,
-        Amount = vehicle.PurchasePrice ?? vehicle.EstimatedSaleValue ?? 0m,
-        EstimatedSaleValue = vehicle.EstimatedSaleValue ?? 0m,
-        AcquisitionDate = new DateOnly(Math.Max(1, vehicle.ModelYear), 1, 1),
-        SourceType = AssetSourceType.TransportVehicle,
-        TransportVehicleId = vehicle.Id
-    };
-
-    private void SyncLinkedAssetSource(AssetItem asset)
-    {
-        if (asset.SourceType == AssetSourceType.TransportVehicle && asset.TransportVehicleId.HasValue)
-        {
-            var vehicle = Data.TransportVehicles.FirstOrDefault(item => item.Id == asset.TransportVehicleId.Value);
-            if (vehicle is not null)
-            {
-                asset.Name = vehicle.Name;
-                asset.Type = "Vehicle";
-                asset.Description = BuildTransportVehicleAssetDescription(vehicle);
-            }
-        }
-        else if (asset.SourceType == AssetSourceType.HomeResidence && asset.HomeResidenceId.HasValue)
-        {
-            var residence = Data.HomeResidence;
-            if (residence is not null && residence.Id == asset.HomeResidenceId.Value)
-            {
-                asset.Name = BuildHomeResidenceAssetName(residence);
-                asset.Type = BuildHomeResidenceAssetType(residence);
-                asset.Description = BuildHomeResidenceAssetDescription(residence);
-            }
-        }
-    }
-
-    private void SyncHomeResidenceAsset() => SyncHomeResidenceAssetInMemory();
-
-    private void SyncHomeResidenceAssetInMemory()
-    {
-        var residence = Data.HomeResidence;
-        if (residence is null)
-        {
-            return;
-        }
-
-        var isOwnedResidence = residence.ResidenceType is HomeResidenceType.Condominium or HomeResidenceType.House;
-        if (!isOwnedResidence)
-        {
-            if (residence.AssetId.HasValue)
-            {
-                Data.Assets.RemoveAll(asset => asset.Id == residence.AssetId.Value || asset.HomeResidenceId == residence.Id);
-                residence.AssetId = null;
-            }
-
-            return;
-        }
-
-        var acquisitionDate = new DateOnly(Math.Max(1, residence.PurchaseYear ?? DateTime.Today.Year), 1, 1);
-        var purchaseValue = residence.PurchasePrice ?? 0m;
-        var estimatedSaleValue = residence.CurrentMarketValue ?? 0m;
-
-        AssetItem? asset = null;
-        if (residence.AssetId.HasValue)
-        {
-            asset = Data.Assets.FirstOrDefault(item => item.Id == residence.AssetId.Value);
-        }
-
-        asset ??= Data.Assets.FirstOrDefault(item => item.HomeResidenceId == residence.Id);
-
-        if (asset is null)
-        {
-            asset = new AssetItem
-            {
-                HomeResidenceId = residence.Id,
-                SourceType = AssetSourceType.HomeResidence
-            };
-
-            Data.Assets.Add(asset);
-        }
-
-        residence.AssetId = asset.Id;
-        asset.Name = BuildHomeResidenceAssetName(residence);
-        asset.Type = BuildHomeResidenceAssetType(residence);
-        asset.Description = BuildHomeResidenceAssetDescription(residence);
-        asset.PurchaseValue = purchaseValue;
-        asset.Amount = purchaseValue;
-        asset.EstimatedSaleValue = estimatedSaleValue;
-        asset.AcquisitionDate = acquisitionDate;
-        asset.SourceType = AssetSourceType.HomeResidence;
-        asset.HomeResidenceId = residence.Id;
-    }
+            account.Id);
 
     private static decimal ConvertPercentageToDecimal(decimal percentageRate) => percentageRate / 100m;
 
@@ -3790,7 +3867,6 @@ public sealed class ApplicationState
             var value when MatchesLocalizedOrStableValue(value, InheritanceIncomeType, "incomeType.Inheritance") => InheritanceIncomeType,
             var value when MatchesLocalizedOrStableValue(value, GiftIncomeType, "incomeType.Gift") => GiftIncomeType,
             var value when MatchesLocalizedOrStableValue(value, OtherIncomeType, "incomeType.Other") => OtherIncomeType,
-            var value when MatchesLocalizedOrStableValue(value, AssetSaleSubcategory, "assets.assetSale") => AssetSaleSubcategory,
             var value when MatchesLocalizedOrStableValue(value, "Bank", "savings.bankTab") => "Bank",
             var value when MatchesLocalizedOrStableValue(value, "Fund", "savings.fundsTab") => "Fund",
             var value when MatchesLocalizedOrStableValue(value, "Stock", "savings.stocksTab") => "Stock",
@@ -3864,22 +3940,6 @@ public sealed class ApplicationState
         return trimmedSubcategory;
     }
 
-    private string GetHomeResidenceAssetNameDisplay(HomeResidence residence) =>
-        residence.ResidenceType switch
-        {
-            HomeResidenceType.Condominium => $"{_localizer["housing.homeResidence"]} {_localizer["housing.residenceType.condominium"]}",
-            HomeResidenceType.House => $"{_localizer["housing.homeResidence"]} {_localizer["housing.residenceType.house"]}",
-            _ => _localizer["housing.homeResidence"]
-        };
-
-    private string GetHomeResidenceAssetTypeDisplay(HomeResidence residence) =>
-        residence.ResidenceType switch
-        {
-            HomeResidenceType.Condominium => _localizer["housing.residenceType.condominium"],
-            HomeResidenceType.House => _localizer["housing.residenceType.house"],
-            _ => _localizer["nav.housingTab"]
-        };
-
     private bool MatchesLocalizedOrStableValue(string value, string stableValue, string localizationKey) =>
         string.Equals(value, stableValue, StringComparison.Ordinal) ||
         string.Equals(value, _localizer[localizationKey], StringComparison.Ordinal);
@@ -3915,6 +3975,7 @@ public sealed class ApplicationState
         new() { Key = "subcategory.housing.alarm", MainCategory = SubcategoryMainCategory.Housing, SwedishName = "Larm", EnglishName = "Alarm" },
         new() { Key = "subcategory.transport.petrol", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Bensin", EnglishName = "Petrol" },
         new() { Key = "subcategory.transport.diesel", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Diesel", EnglishName = "Diesel" },
+        new() { Key = "subcategory.transport.gas", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Gas", EnglishName = "Gas" },
         new() { Key = "subcategory.transport.electricity", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "El", EnglishName = "Electricity" },
         new() { Key = "subcategory.transport.car_insurance", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Bilförsäkring", EnglishName = "Car insurance" },
         new() { Key = "subcategory.transport.vehicle_tax", MainCategory = SubcategoryMainCategory.Transport, SwedishName = "Fordonskatt", EnglishName = "Vehicle tax" },
@@ -4057,6 +4118,13 @@ public sealed class ApplicationState
         TransactionImportData.ImportBatches ??= [];
         TransactionImportData.ImportBatches = TransactionImportData.ImportBatches
             .Where(batch => batch.ImportId != Guid.Empty && batch.ImportedRecordCount > 0)
+            .Select(batch => new TransactionImportBatch
+            {
+                ImportId = batch.ImportId,
+                MemberId = NormalizeOptionalMemberId(batch.MemberId),
+                ImportedAtUtc = batch.ImportedAtUtc,
+                ImportedRecordCount = batch.ImportedRecordCount
+            })
             .GroupBy(batch => batch.ImportId)
             .Select(group => group
                 .OrderByDescending(batch => batch.ImportedAtUtc)
@@ -4227,12 +4295,42 @@ public sealed class ApplicationState
         return distributed;
     }
 
+    private static string NormalizeMemberInitials(string initials)
+    {
+        var trimmedInitials = initials.Trim().ToUpperInvariant();
+        return trimmedInitials.Length <= 3
+            ? trimmedInitials
+            : trimmedInitials[..3];
+    }
+
+    private static bool SwishTransactionMatchesPhoneNumber(string text, string phoneNumber)
+    {
+        if (string.IsNullOrWhiteSpace(text) ||
+            text.IndexOf("swish", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return false;
+        }
+
+        return SwishPhoneRegex.Matches(text)
+            .Select(match => match.Value)
+            .Any(value => string.Equals(value, phoneNumber, StringComparison.OrdinalIgnoreCase));
+    }
+
     private HouseholdMember GetMember(Guid memberId) =>
         Data.Members.FirstOrDefault(member => member.Id == memberId)
         ?? throw new InvalidOperationException("Member was not found.");
 
     private string GetMemberNameOrUnknown(Guid memberId) =>
         Data.Members.FirstOrDefault(member => member.Id == memberId)?.Name ?? _localizer["common.unknown"];
+
+    private static Guid? NormalizeOptionalMemberId(Guid? memberId) =>
+        !memberId.HasValue || memberId.Value == Guid.Empty
+            ? null
+            : memberId.Value;
+
+    private static bool ShouldReportProgress(int processedCount, int totalCount, int batchSize) =>
+        totalCount > 0 &&
+        (processedCount % Math.Max(1, batchSize) == 0 || processedCount == totalCount);
 
     private decimal GetMonthlyIncome(int year, int month) =>
         Data.IncomeRecords
@@ -4261,6 +4359,90 @@ public sealed class ApplicationState
     private decimal GetSavingsForMonth(DateOnly reportMonth)
     {
         return Data.SavingsAccounts.Sum(account => GetBalanceAtOrBeforeMonth(account.Id, NormalizeMonth(reportMonth)));
+    }
+
+    private (int MonthsRemaining, string VehicleName, int? EndYear, int? EndMonth) GetActiveLeasingMetric(DateOnly reportMonth)
+    {
+        var normalizedMonth = NormalizeMonth(reportMonth);
+        var activeContract = GetActiveTransportLeasingContracts(normalizedMonth)
+            .OrderByDescending(contract => NormalizeMonth(contract.EndDate))
+            .FirstOrDefault();
+
+        if (activeContract is null)
+        {
+            return (0, string.Empty, null, null);
+        }
+
+        var endMonth = NormalizeMonth(activeContract.EndDate);
+        var monthsRemaining = endMonth < normalizedMonth
+            ? 0
+            : ((endMonth.Year - normalizedMonth.Year) * 12) + endMonth.Month - normalizedMonth.Month + 1;
+        var vehicleName = activeContract.VehicleId.HasValue
+            ? Data.TransportVehicles.FirstOrDefault(vehicle => vehicle.Id == activeContract.VehicleId.Value)?.Name?.Trim() ?? string.Empty
+            : string.Empty;
+
+        return (monthsRemaining, vehicleName, endMonth.Year, endMonth.Month);
+    }
+
+    private decimal GetAverageIncomeForClosedMonths(IReadOnlyList<ClosedMonth> closedMonths, Func<IncomeEntry, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(closedMonths);
+        ArgumentNullException.ThrowIfNull(predicate);
+
+        if (closedMonths.Count == 0)
+        {
+            return 0m;
+        }
+
+        var monthKeys = closedMonths
+            .Select(month => (month.Year, month.Month))
+            .ToHashSet();
+
+        return Data.IncomeRecords
+            .Where(predicate)
+            .Where(entry => monthKeys.Contains((entry.Year, entry.Month)))
+            .Sum(entry => entry.Amount) / closedMonths.Count;
+    }
+
+    private decimal GetAverageExpenseForClosedMonths(IReadOnlyList<ClosedMonth> closedMonths, Func<ExpenseEntry, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(closedMonths);
+        ArgumentNullException.ThrowIfNull(predicate);
+
+        if (closedMonths.Count == 0)
+        {
+            return 0m;
+        }
+
+        var monthKeys = closedMonths
+            .Select(month => (month.Year, month.Month))
+            .ToHashSet();
+
+        return Data.ExpenseRecords
+            .Where(predicate)
+            .Where(entry => monthKeys.Contains((entry.Year, entry.Month)))
+            .Sum(entry => entry.Amount) / closedMonths.Count;
+    }
+
+    private bool IsExpenseSubcategory(ExpenseEntry expense, SubcategoryMainCategory mainCategory, string localizationKey)
+    {
+        var localizedLabel = GetLocalizedConfiguredSubcategoryLabel(mainCategory, expense.Subcategory);
+        var expectedLabel = _localizer[localizationKey];
+        return string.Equals(localizedLabel, expectedLabel, StringComparison.CurrentCultureIgnoreCase) ||
+               string.Equals(expense.Subcategory?.Trim(), expectedLabel, StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private bool ExpenseSubcategoryContainsInsurance(ExpenseEntry expense)
+    {
+        var localizedLabel = GetLocalizedConfiguredSubcategoryLabel(MapExpenseCategoryToMainCategory(expense.Category), expense.Subcategory);
+        return ContainsInsurance(localizedLabel) || ContainsInsurance(expense.Subcategory);
+    }
+
+    private static bool ContainsInsurance(string? value)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        return normalized.Contains("försäkring", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("insurance", StringComparison.OrdinalIgnoreCase);
     }
 
     private decimal GetPropertyValueForMonth(DateOnly reportMonth)
@@ -4302,8 +4484,13 @@ public sealed class ApplicationState
                  entry.Subcategory.EndsWith($" - {AmortizationSubcategory}", StringComparison.Ordinal)))
             .Sum(entry => entry.Amount);
 
-    private decimal CalculateBalanceForMonth(DateOnly reportMonth) =>
-        GetSavingsForMonth(reportMonth) - (GetHousingLoanDebtForMonth(reportMonth) + GetCreditsDebtForMonth(reportMonth));
+    private decimal CalculateBalanceForMonth(DateOnly reportMonth)
+    {
+        var totalSavings = GetSavingsForMonth(reportMonth);
+        var totalHousingLoans = GetHousingLoanDebtForMonth(reportMonth);
+        var totalCreditDebt = GetCreditsDebtForMonth(reportMonth);
+        return totalSavings - (totalHousingLoans + totalCreditDebt);
+    }
 
     private SavingsAccount GetSavingsAccount(Guid accountId) =>
         Data.SavingsAccounts.FirstOrDefault(item => item.Id == accountId)
@@ -4517,9 +4704,9 @@ public sealed class ApplicationState
             .ThenBy(month => month.Month)
             .ToList();
 
-    private async Task<Guid> AddGeneratedOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null)
+    private async Task<Guid> AddGeneratedOneTimeExpenseAsync(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null)
     {
-        var entry = AddOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId, assetId);
+        var entry = AddOneTimeExpenseEntry(amount, year, month, category, subcategory, description, metadata, transportVehicleId, savingsAccountId);
 
         await PersistAndNotifyAndLogAsync(
             BuildLogDescription(_localizer["nav.expenses"], _localizer["expenses.expensesTab"]),
@@ -4528,9 +4715,9 @@ public sealed class ApplicationState
         return entry.Id;
     }
 
-    private ExpenseEntry AddOneTimeExpenseEntry(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, Guid? assetId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null)
+    private ExpenseEntry AddOneTimeExpenseEntry(decimal amount, int year, int month, ExpenseCategory category, string subcategory, string description, string? metadata = null, Guid? transportVehicleId = null, Guid? savingsAccountId = null, DateOnly? transactionDate = null, Guid? importId = null, int? importOccurrence = null, Guid? memberId = null)
     {
-        var entry = CreateOneTimeExpenseEntry(amount, year, month, category, subcategory, description, transactionDate, metadata, transportVehicleId, savingsAccountId, assetId, importId, importOccurrence);
+        var entry = CreateOneTimeExpenseEntry(amount, year, month, category, subcategory, description, transactionDate, metadata, transportVehicleId, savingsAccountId, importId, importOccurrence, memberId);
         Data.ExpenseRecords.Add(entry);
         return entry;
     }

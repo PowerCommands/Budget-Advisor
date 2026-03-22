@@ -1,6 +1,7 @@
 @page "/household"
 @using System.ComponentModel.DataAnnotations
 @using System.Globalization
+@using System.Text.RegularExpressions
 @implements IDisposable
 @inject ApplicationState AppState
 @inject IDialogService DialogService
@@ -16,6 +17,53 @@
                     <span>@Localizer["filter.showAllIncomes"]</span>
                 </label>
             </div>
+            <div class="form-grid mb-3">
+                <div>
+                    <label class="form-label">@Localizer["field.member"]</label>
+                    <InputSelect class="form-select" @bind-Value="incomeMemberFilter">
+                        <option value="">@Localizer["filter.allCategories"]</option>
+                        <option value="@UnassignedMemberFilterValue">@Localizer["common.unknown"]</option>
+                        @foreach (var member in IncomeMemberOptions)
+                        {
+                            <option value="@member.Id">@member.Name</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.subcategory"]</label>
+                    <InputSelect class="form-select" @bind-Value="incomeSubcategoryFilter">
+                        <option value="">@Localizer["filter.allSubcategories"]</option>
+                        @foreach (var subcategory in IncomeSubcategoryOptions)
+                        {
+                            <option value="@subcategory">@subcategory</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.year"]</label>
+                    <InputSelect class="form-select" @bind-Value="incomeYearFilter">
+                        <option value="">@Localizer["filter.allCategories"]</option>
+                        @foreach (var year in IncomeYearOptions)
+                        {
+                            <option value="@year">@year</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.month"]</label>
+                    <InputSelect class="form-select" @bind-Value="incomeMonthFilter">
+                        <option value="">@Localizer["filter.allCategories"]</option>
+                        @foreach (var month in IncomeMonthOptions)
+                        {
+                            <option value="@month">@Localizer[$"month.{month}"]</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.amount"]</label>
+                    <InputText class="form-control" @bind-Value="incomeAmountFilter" />
+                </div>
+            </div>
             <div class="table-responsive">
                 <table class="table app-table">
                     <thead>
@@ -29,41 +77,62 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var income in IncomeEntries)
+                        @if (!IncomeEntries.Any())
                         {
                             <tr>
-                                <td>@GetIncomeOwnerLabel(income)</td>
-                                <td>@GetIncomeTypeDisplay(income)</td>
-                                <td>@income.Year</td>
-                                <td>@Localizer[$"month.{income.Month}"]</td>
-                                <td class="income-amount-cell" @ondblclick="() => BeginEditIncomeAmount(income)">
-                                    @if (editingIncomeId == income.Id)
-                                    {
-                                        <input @ref="editingIncomeAmountInput"
-                                               class="form-control form-control-sm income-amount-input"
-                                               value="@editingIncomeAmountText"
-                                               @oninput="HandleIncomeAmountInput"
-                                               @onkeydown="HandleIncomeAmountKeyDownAsync"
-                                               @onblur="HandleIncomeAmountBlurAsync" />
-                                    }
-                                    else
-                                    {
-                                        <span>@AppState.FormatCurrency(income.Amount)</span>
-                                    }
-                                </td>
-                                <td>
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                   Color="Color.Error"
-                                                   Size="Size.Small"
-                                                   OnClick="@(() => HandleDeleteIncomeAsync(income))" />
-                                </td>
+                                <td colspan="6" class="empty-state">@Localizer["table.noIncomeRows"]</td>
                             </tr>
                         }
-                        <tr class="table-summary-row">
-                            <td colspan="4"><strong>@($"{Localizer["table.sum"]}:")</strong></td>
-                            <td><strong>@AppState.FormatCurrency(TotalIncomeAmount)</strong></td>
-                            <td></td>
-                        </tr>
+                        else
+                        {
+                            @foreach (var income in IncomeEntries)
+                            {
+                                <tr>
+                                    <td>@GetIncomeOwnerLabel(income)</td>
+                                    <td>@GetIncomeTypeDisplay(income)</td>
+                                    <td>@income.Year</td>
+                                    <td>@Localizer[$"month.{income.Month}"]</td>
+                                    <td class="income-amount-cell" @ondblclick="() => BeginEditIncomeAmount(income)">
+                                        @if (editingIncomeId == income.Id)
+                                        {
+                                            <input @ref="editingIncomeAmountInput"
+                                                   class="form-control form-control-sm income-amount-input"
+                                                   value="@editingIncomeAmountText"
+                                                   @oninput="HandleIncomeAmountInput"
+                                                   @onkeydown="HandleIncomeAmountKeyDownAsync"
+                                                   @onblur="HandleIncomeAmountBlurAsync" />
+                                        }
+                                        else
+                                        {
+                                            <span>@AppState.FormatCurrency(income.Amount)</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <div class="button-row income-action-row">
+                                            @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                                            {
+                                                <button class="btn btn-outline-primary btn-sm member-initial-button"
+                                                        title="@member.Name"
+                                                        disabled="@(income.MemberId == member.Id)"
+                                                        @onclick="() => HandleAssignIncomeMemberAsync(income, member.Id)">
+                                                    @GetMemberInitials(member)
+                                                </button>
+                                            }
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Color="Color.Error"
+                                                           Size="Size.Small"
+                                                           OnClick="@(() => HandleDeleteIncomeAsync(income))" />
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+
+                            <tr class="table-summary-row">
+                                <td colspan="4"><strong>@($"{Localizer["table.sum"]}:")</strong></td>
+                                <td><strong>@AppState.FormatCurrency(TotalIncomeAmount)</strong></td>
+                                <td></td>
+                            </tr>
+                        }
                     </tbody>
                 </table>
             </div>
@@ -214,6 +283,11 @@
                             <InputText class="form-control" @bind-Value="memberForm.Name" />
                             <ValidationMessage For="() => memberForm.Name" />
                         </div>
+                        <div>
+                            <label class="form-label">@Localizer["field.initials"]</label>
+                            <InputText class="form-control text-uppercase" @bind-Value="memberForm.Initials" @bind-Value:event="oninput" />
+                            <ValidationMessage For="() => memberForm.Initials" />
+                        </div>
                     </div>
                     <button class="btn btn-primary" type="submit">@Localizer["action.addMember"]</button>
                 </EditForm>
@@ -227,11 +301,54 @@
                 }
                 else
                 {
-                    <div class="chip-list">
-                        @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
-                        {
-                            <span class="chip">@member.Name</span>
-                        }
+                    <div class="table-responsive">
+                        <table class="table app-table">
+                            <thead>
+                                <tr>
+                                    <th>@Localizer["field.name"]</th>
+                                    <th>@Localizer["field.initial"]</th>
+                                    <th>@Localizer["household.averageMonthlyIncome"]</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                                {
+                                    <tr>
+                                        <td class="member-edit-cell" @ondblclick="() => BeginEditMember(member, MemberEditField.Name)">
+                                            @if (editingMemberId == member.Id && editingMemberField == MemberEditField.Name)
+                                            {
+                                                <input @ref="editingMemberInput"
+                                                       class="form-control form-control-sm member-edit-input"
+                                                       value="@editingMemberText"
+                                                       @oninput="HandleMemberInput"
+                                                       @onkeydown="HandleMemberKeyDownAsync"
+                                                       @onblur="HandleMemberBlurAsync" />
+                                            }
+                                            else
+                                            {
+                                                <span>@member.Name</span>
+                                            }
+                                        </td>
+                                        <td class="member-edit-cell" @ondblclick="() => BeginEditMember(member, MemberEditField.Initials)">
+                                            @if (editingMemberId == member.Id && editingMemberField == MemberEditField.Initials)
+                                            {
+                                                <input @ref="editingMemberInput"
+                                                       class="form-control form-control-sm member-edit-input text-uppercase"
+                                                       value="@editingMemberText"
+                                                       @oninput="HandleMemberInput"
+                                                       @onkeydown="HandleMemberKeyDownAsync"
+                                                       @onblur="HandleMemberBlurAsync" />
+                                            }
+                                            else
+                                            {
+                                                <span>@GetMemberInitials(member)</span>
+                                            }
+                                        </td>
+                                        <td>@AppState.FormatCurrency(GetAverageMonthlyIncome(member.Id))</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
                     </div>
                 }
             </section>
@@ -247,17 +364,28 @@
     private EditContext oneTimeIncomeEditContext = default!;
     private EditContext salaryGenerationEditContext = default!;
     private bool showAllIncomes;
+    private string incomeMemberFilter = string.Empty;
+    private string incomeSubcategoryFilter = string.Empty;
+    private string incomeYearFilter = string.Empty;
+    private string incomeMonthFilter = string.Empty;
+    private string incomeAmountFilter = string.Empty;
     private Guid? editingIncomeId;
     private string editingIncomeAmountText = string.Empty;
     private ElementReference editingIncomeAmountInput;
     private bool shouldFocusEditingIncomeAmount;
+    private Guid? editingMemberId;
+    private MemberEditField? editingMemberField;
+    private string editingMemberText = string.Empty;
+    private ElementReference editingMemberInput;
+    private bool shouldFocusEditingMember;
+    private const string UnassignedMemberFilterValue = "__unassigned__";
 
     private bool HasMembers => AppState.Data.Members.Count > 0;
 
     private IReadOnlyList<SalaryIncomePeriodDisplay> SalaryPeriods => AppState.GetSalaryIncomePeriods();
 
     private IReadOnlyList<IncomeEntry> IncomeEntries =>
-        AppState.Data.IncomeRecords
+        GetFilteredIncomeEntries()
             .Where(record =>
                 showAllIncomes ||
                 (record.Year == DateTime.Today.Year && record.Month == DateTime.Today.Month))
@@ -269,6 +397,33 @@
 
     private decimal TotalIncomeAmount => IncomeEntries.Sum(record => record.Amount);
 
+    private IReadOnlyList<HouseholdMember> IncomeMemberOptions =>
+        AppState.Data.Members
+            .OrderBy(member => member.Name)
+            .ToList();
+
+    private IReadOnlyList<string> IncomeSubcategoryOptions =>
+        FilterIncomeEntries(skipSubcategoryFilter: true)
+            .Select(GetIncomeTypeDisplay)
+            .Where(type => !string.IsNullOrWhiteSpace(type))
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .OrderBy(type => type, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+    private IReadOnlyList<int> IncomeYearOptions =>
+        FilterIncomeEntries(skipYearFilter: true)
+            .Select(entry => entry.Year)
+            .Distinct()
+            .OrderByDescending(year => year)
+            .ToList();
+
+    private IReadOnlyList<int> IncomeMonthOptions =>
+        FilterIncomeEntries(skipMonthFilter: true)
+            .Select(entry => entry.Month)
+            .Distinct()
+            .OrderBy(month => month)
+            .ToList();
+
     protected override void OnInitialized()
     {
         AppState.Changed += HandleChanged;
@@ -278,19 +433,26 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!shouldFocusEditingIncomeAmount)
+        if (shouldFocusEditingIncomeAmount)
         {
+            shouldFocusEditingIncomeAmount = false;
+            await editingIncomeAmountInput.FocusAsync();
             return;
         }
 
-        shouldFocusEditingIncomeAmount = false;
-        await editingIncomeAmountInput.FocusAsync();
+        if (shouldFocusEditingMember)
+        {
+            shouldFocusEditingMember = false;
+            await editingMemberInput.FocusAsync();
+        }
     }
 
     private async Task HandleAddMemberAsync()
     {
-        await AppState.AddMemberAsync(memberForm.Name);
+        memberForm.Initials = NormalizeInitialsInput(memberForm.Initials);
+        await AppState.AddMemberAsync(memberForm.Name, memberForm.Initials);
         memberForm.Name = string.Empty;
+        memberForm.Initials = string.Empty;
     }
 
     private async Task HandleAddOneTimeIncomeAsync()
@@ -396,6 +558,11 @@
         await AppState.RemoveSalaryIncomePeriodAsync(salaryPeriod.Id);
     }
 
+    private async Task HandleAssignIncomeMemberAsync(IncomeEntry income, Guid memberId)
+    {
+        await AppState.UpdateIncomeMemberAsync(income.Id, memberId);
+    }
+
     private void BeginEditIncomeAmount(IncomeEntry income)
     {
         editingIncomeId = income.Id;
@@ -458,6 +625,84 @@
         shouldFocusEditingIncomeAmount = false;
     }
 
+    private void BeginEditMember(HouseholdMember member, MemberEditField field)
+    {
+        editingMemberId = member.Id;
+        editingMemberField = field;
+        editingMemberText = field == MemberEditField.Name
+            ? member.Name
+            : GetMemberInitials(member);
+        shouldFocusEditingMember = true;
+    }
+
+    private void HandleMemberInput(ChangeEventArgs args)
+    {
+        editingMemberText = args.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task HandleMemberKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key is "Enter" or "NumpadEnter" or "Tab")
+        {
+            await SaveEditedMemberAsync();
+            return;
+        }
+
+        if (args.Key == "Escape")
+        {
+            CancelEditedMember();
+        }
+    }
+
+    private async Task HandleMemberBlurAsync(FocusEventArgs _)
+    {
+        await SaveEditedMemberAsync();
+    }
+
+    private async Task SaveEditedMemberAsync()
+    {
+        if (!editingMemberId.HasValue || !editingMemberField.HasValue)
+        {
+            return;
+        }
+
+        var member = AppState.Data.Members.FirstOrDefault(item => item.Id == editingMemberId.Value);
+        if (member is null)
+        {
+            CancelEditedMember();
+            return;
+        }
+
+        var name = member.Name;
+        var initials = GetMemberInitials(member);
+
+        if (editingMemberField == MemberEditField.Name)
+        {
+            name = editingMemberText.Trim();
+        }
+        else
+        {
+            initials = NormalizeInitialsInput(editingMemberText);
+        }
+
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(initials))
+        {
+            CancelEditedMember();
+            return;
+        }
+
+        await AppState.UpdateMemberAsync(member.Id, name, initials);
+        CancelEditedMember();
+    }
+
+    private void CancelEditedMember()
+    {
+        editingMemberId = null;
+        editingMemberField = null;
+        editingMemberText = string.Empty;
+        shouldFocusEditingMember = false;
+    }
+
     private static bool TryParseIncomeAmount(string value, out decimal amount)
     {
         if (decimal.TryParse(value, NumberStyles.Number, CultureInfo.CurrentCulture, out amount))
@@ -484,8 +729,48 @@
     private string GetMemberName(Guid memberId) =>
         AppState.Data.Members.FirstOrDefault(member => member.Id == memberId)?.Name ?? Localizer["common.unknown"];
 
+    private decimal GetAverageMonthlyIncome(Guid memberId)
+    {
+        var memberIncomes = AppState.Data.IncomeRecords
+            .Where(entry => entry.MemberId == memberId)
+            .ToList();
+
+        if (memberIncomes.Count == 0)
+        {
+            return 0m;
+        }
+
+        var monthCount = memberIncomes
+            .Select(entry => (entry.Year, entry.Month))
+            .Distinct()
+            .Count();
+
+        return monthCount == 0
+            ? 0m
+            : memberIncomes.Sum(entry => entry.Amount) / monthCount;
+    }
+
+    private string GetMemberInitials(HouseholdMember member)
+    {
+        var initials = NormalizeInitialsInput(member.Initials);
+        if (!string.IsNullOrWhiteSpace(initials))
+        {
+            return initials;
+        }
+
+        var lettersOnly = new string(member.Name.Where(char.IsLetter).ToArray());
+        if (string.IsNullOrWhiteSpace(lettersOnly))
+        {
+            return "???";
+        }
+
+        return lettersOnly.Length <= 3
+            ? lettersOnly.ToUpperInvariant()
+            : lettersOnly[..3].ToUpperInvariant();
+    }
+
     private string GetIncomeOwnerLabel(IncomeEntry income) =>
-        (income.SavingsAccountId.HasValue || income.AssetId.HasValue) && !string.IsNullOrWhiteSpace(income.Metadata)
+        income.SavingsAccountId.HasValue && !string.IsNullOrWhiteSpace(income.Metadata)
             ? income.Metadata
             : GetMemberName(income.MemberId);
 
@@ -501,6 +786,60 @@
     private IReadOnlyList<string> GetIncomeTypeSuggestions() =>
         AppState.GetIncomeTypeSuggestions();
 
+    private IReadOnlyList<IncomeEntry> GetFilteredIncomeEntries() =>
+        FilterIncomeEntries().ToList();
+
+    private IEnumerable<IncomeEntry> FilterIncomeEntries(
+        bool skipMemberFilter = false,
+        bool skipSubcategoryFilter = false,
+        bool skipYearFilter = false,
+        bool skipMonthFilter = false,
+        bool skipAmountFilter = false)
+    {
+        var query = AppState.Data.IncomeRecords.AsEnumerable();
+
+        if (!skipMemberFilter && !string.IsNullOrWhiteSpace(incomeMemberFilter))
+        {
+            query = string.Equals(incomeMemberFilter, UnassignedMemberFilterValue, StringComparison.Ordinal)
+                ? query.Where(entry => entry.MemberId == Guid.Empty)
+                : Guid.TryParse(incomeMemberFilter, out var memberId)
+                    ? query.Where(entry => entry.MemberId == memberId)
+                    : query;
+        }
+
+        if (!skipSubcategoryFilter && !string.IsNullOrWhiteSpace(incomeSubcategoryFilter))
+        {
+            query = query.Where(entry => string.Equals(GetIncomeTypeDisplay(entry), incomeSubcategoryFilter, StringComparison.CurrentCultureIgnoreCase));
+        }
+
+        if (!skipYearFilter && int.TryParse(incomeYearFilter, out var year))
+        {
+            query = query.Where(entry => entry.Year == year);
+        }
+
+        if (!skipMonthFilter && int.TryParse(incomeMonthFilter, out var month))
+        {
+            query = query.Where(entry => entry.Month == month);
+        }
+
+        if (!skipAmountFilter &&
+            !string.IsNullOrWhiteSpace(incomeAmountFilter) &&
+            TryParseIncomeAmount(incomeAmountFilter, out var amount))
+        {
+            query = query.Where(entry => entry.Amount == amount);
+        }
+
+        return query;
+    }
+
+    private static string NormalizeInitialsInput(string value)
+    {
+        var lettersOnly = Regex.Replace(value ?? string.Empty, "[^\\p{L}]", string.Empty);
+        return lettersOnly.Length <= 3
+            ? lettersOnly.ToUpperInvariant()
+            : lettersOnly[..3].ToUpperInvariant();
+    }
+
     private void HandleChanged() => InvokeAsync(StateHasChanged);
 
     public void Dispose()
@@ -514,6 +853,10 @@
         [Required(ErrorMessage = "Name is required.")]
         [StringLength(100, ErrorMessage = "Name must be 100 characters or fewer.")]
         public string Name { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Initials are required.")]
+        [RegularExpression(@"^\p{L}{1,3}$", ErrorMessage = "Initials must be 1-3 letters.")]
+        public string Initials { get; set; } = string.Empty;
     }
 
     private sealed class OneTimeIncomeFormModel
@@ -568,6 +911,12 @@
             }
         }
     }
+
+    private enum MemberEditField
+    {
+        Name,
+        Initials
+    }
 }
 
 <style>
@@ -577,6 +926,23 @@
     }
 
     .income-amount-input {
+        min-width: 120px;
+    }
+
+    .income-action-row {
+        flex-wrap: wrap;
+    }
+
+    .member-initial-button {
+        min-width: 3rem;
+    }
+
+    .member-edit-cell {
+        min-width: 140px;
+        cursor: text;
+    }
+
+    .member-edit-input {
         min-width: 120px;
     }
 </style>

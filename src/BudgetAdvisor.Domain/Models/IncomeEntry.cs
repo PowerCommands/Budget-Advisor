@@ -28,7 +28,5 @@ public sealed class IncomeEntry
 
     public Guid? SavingsAccountId { get; set; }
 
-    public Guid? AssetId { get; set; }
-
     public Guid? SeriesId { get; set; }
 }

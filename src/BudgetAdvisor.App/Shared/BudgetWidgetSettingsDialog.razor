@@ -1,0 +1,52 @@
+@inject LocalizationService Localizer
+
+<WidgetSettingsDialogShell Title="@Localizer["start.budgetWidgetSettingsTitle"]"
+                           SaveText="@Localizer["action.save"]"
+                           CancelText="@Localizer["action.cancel"]"
+                           SaveResult="@useSavingsToBalance">
+    <div class="widget-setting-row">
+        <label class="widget-setting-checkbox">
+            <InputCheckbox class="form-check-input" @bind-Value="useSavingsToBalance" />
+            <span>@Localizer["start.useSavingsToBalance"]</span>
+        </label>
+        <div class="section-note widget-setting-help">
+            @Localizer["start.useSavingsToBalanceHelp1"]
+        </div>
+        <div class="section-note widget-setting-help">
+            @Localizer["start.useSavingsToBalanceHelp2"]
+        </div>
+        <div class="section-note widget-setting-help">
+            @Localizer["start.useSavingsToBalanceHelp3"]
+        </div>
+    </div>
+</WidgetSettingsDialogShell>
+
+@code {
+    [Parameter]
+    public bool UseSavingsToBalance { get; set; }
+
+    private bool useSavingsToBalance;
+
+    protected override void OnInitialized()
+    {
+        useSavingsToBalance = UseSavingsToBalance;
+    }
+}
+
+<style>
+    .widget-setting-row {
+        display: grid;
+        gap: 0.5rem;
+    }
+
+    .widget-setting-checkbox {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-weight: 600;
+    }
+
+    .widget-setting-help {
+        max-width: 60ch;
+    }
+</style>

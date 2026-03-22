@@ -1,0 +1,997 @@
+@page "/analysis"
+@using System.Text.RegularExpressions
+@implements IDisposable
+@inject ApplicationState AppState
+@inject IDialogService DialogService
+@inject LocalizationService Localizer
+@inject IJSRuntime JSRuntime
+@inject ISnackbar Snackbar
+
+<MudTabs Rounded="true" Elevation="0" PanelClass="pt-4">
+    <MudTabPanel Text="@Localizer["analysis.transfersTab"]" Icon="@Icons.Material.Filled.SwapHoriz">
+        <section class="card-panel">
+            <div class="section-title-row">
+                <h2>@Localizer["analysis.transfers"]</h2>
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.Delete"
+                           Disabled="@(FilteredTransfers.Count == 0)"
+                           OnClick="HandleDeleteFilteredTransfersAsync">
+                    @Localizer["action.deleteAll"]
+                </MudButton>
+            </div>
+
+            <div class="form-grid mb-3">
+                <div>
+                    <label class="form-label">@Localizer["field.income"]</label>
+                    <InputText class="form-control" @bind-Value="incomeFilter" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.expense"]</label>
+                    <InputText class="form-control" @bind-Value="expenseFilter" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.category"]</label>
+                    <InputSelect class="form-select" @bind-Value="categoryFilter">
+                        <option value="">@Localizer["filter.allCategories"]</option>
+                        @foreach (var option in CategoryOptions)
+                        {
+                            <option value="@option">@Localizer[$"expenseCategory.{option}"]</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["field.subcategory"]</label>
+                    <InputSelect class="form-select" @bind-Value="subcategoryFilter">
+                        <option value="">@Localizer["filter.allSubcategories"]</option>
+                        @foreach (var option in SubcategoryOptions)
+                        {
+                            <option value="@option">@option</option>
+                        }
+                    </InputSelect>
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["filter.startDate"]</label>
+                    <InputDate class="form-control" @bind-Value="startDateFilter" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["filter.endDate"]</label>
+                    <InputDate class="form-control" @bind-Value="endDateFilter" />
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["field.income"]</th>
+                            <th>@Localizer["field.expense"]</th>
+                            <th>@Localizer["field.category"]</th>
+                            <th>@Localizer["field.subcategory"]</th>
+                            <th>@Localizer["field.date"]</th>
+                            <th>@Localizer["field.amount"]</th>
+                            <th>@Localizer["field.actions"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!FilteredTransfers.Any())
+                        {
+                            <tr>
+                                <td colspan="7" class="empty-state">@Localizer["analysis.noTransfers"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var transfer in FilteredTransfers)
+                            {
+                                <tr>
+                                    <td>@transfer.IncomeDisplay</td>
+                                    <td>@transfer.ExpenseDisplay</td>
+                                    <td>@Localizer[$"expenseCategory.{transfer.Category}"]</td>
+                                    <td>@transfer.SubcategoryDisplay</td>
+                                    <td>@transfer.Date.ToString("yyyyMMdd")</td>
+                                    <td>@AppState.FormatCurrency(transfer.Amount)</td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => HandleDeleteTransferAsync(transfer))" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+
+    <MudTabPanel>
+        <TabContent>
+            <div class="analysis-tab-with-image">
+                <img src="images/swish.png" alt="Swish" class="analysis-tab-image" />
+                <span>@Localizer["analysis.swishTab"]</span>
+            </div>
+        </TabContent>
+        <ChildContent>
+            <section class="card-panel">
+                <div class="section-title-row">
+                    <h2>@Localizer["analysis.swish"]</h2>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table app-table">
+                        <thead>
+                            <tr>
+                                <th class="expander-column"></th>
+                                <th>@Localizer["field.name"]</th>
+                                <th>@Localizer["field.phoneNumber"]</th>
+                                <th>@Localizer["field.count"]</th>
+                                <th>@Localizer["field.turnover"]</th>
+                                <th>@Localizer["field.actions"]</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (!SwishNumbers.Any())
+                            {
+                                <tr>
+                                    <td colspan="6" class="empty-state">@Localizer["analysis.noSwishNumbers"]</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var swish in SwishNumbers)
+                                {
+                                    <tr>
+                                        <td class="expander-column">
+                                            <MudIconButton Icon="@(IsSwishExpanded(swish.PhoneNumber) ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                                                           Size="Size.Small"
+                                                           Color="Color.Primary"
+                                                           OnClick="@(() => ToggleSwishExpanded(swish.PhoneNumber))" />
+                                        </td>
+                                        <td>@(string.IsNullOrWhiteSpace(swish.Name) ? "-" : swish.Name)</td>
+                                        <td>@swish.PhoneNumber</td>
+                                        <td>@swish.TransactionCount</td>
+                                        <td>@AppState.FormatCurrency(swish.Turnover)</td>
+                                        <td>
+                                            <div class="button-row">
+                                                <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                                                               Size="Size.Small"
+                                                               Color="Color.Primary"
+                                                               aria-label="@Localizer["action.copy"]"
+                                                               OnClick="@(() => HandleCopyPhoneNumberAsync(swish.PhoneNumber))" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                               Size="Size.Small"
+                                                               Color="Color.Error"
+                                                               aria-label="@Localizer["action.delete"]"
+                                                               OnClick="@(() => HandleDeleteSwishNumberAsync(swish))" />
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    @if (IsSwishExpanded(swish.PhoneNumber))
+                                    {
+                                        <tr class="row-detail">
+                                            <td colspan="6">
+                                                <div class="inline-detail-shell">
+                                                    <section class="card-panel mt-4">
+                                                        <div class="swish-name-row">
+                                                            <div class="swish-name-input-shell">
+                                                                <label class="form-label">@Localizer["field.name"]</label>
+                                                                <input class="form-control"
+                                                                       value="@GetSwishNameInput(swish.PhoneNumber)"
+                                                                       @oninput="@((ChangeEventArgs args) => SetSwishNameInput(swish.PhoneNumber, args.Value?.ToString() ?? string.Empty))" />
+                                                            </div>
+                                                            <MudButton Variant="Variant.Filled"
+                                                                       Color="Color.Primary"
+                                                                       OnClick="@(() => HandleSaveSwishNameAsync(swish.PhoneNumber))">
+                                                                @Localizer["action.save"]
+                                                            </MudButton>
+                                                        </div>
+                                                    </section>
+
+                                                    <section class="card-panel mt-4">
+                                                        <h3>@Localizer["field.transactions"]</h3>
+                                                        <div class="table-responsive">
+                                                            <table class="table app-table">
+                                                                <thead>
+                                                                    <tr>
+                                                                        <th>@Localizer["field.date"]</th>
+                                                                        <th>@Localizer["field.name"]</th>
+                                                                        <th>@Localizer["field.amount"]</th>
+                                                                        <th>@Localizer["field.actions"]</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    @foreach (var transaction in swish.Transactions)
+                                                                    {
+                                                                        <tr>
+                                                                            <td>@transaction.Date.ToString("yyyyMMdd")</td>
+                                                                            <td>@($"{(transaction.IsIncome ? "+" : "-")} {transaction.DisplayText}")</td>
+                                                                            <td class="@(transaction.IsIncome ? "text-success" : "text-danger")">
+                                                                                @(transaction.IsIncome ? "+" : "-")@AppState.FormatCurrency(transaction.Amount)
+                                                                            </td>
+                                                                            <td>
+                                                                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                                                               Color="Color.Error"
+                                                                                               Size="Size.Small"
+                                                                                               OnClick="@(() => HandleDeleteSwishTransactionAsync(transaction))" />
+                                                                            </td>
+                                                                        </tr>
+                                                                    }
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </section>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </ChildContent>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["analysis.queryTab"]" Icon="@Icons.Material.Filled.ManageSearch">
+        <section class="card-panel">
+            <div class="section-title-row">
+                <h2>@Localizer["analysis.query"]</h2>
+            </div>
+
+            <div class="query-form-shell">
+                <div>
+                    <label class="form-label">@Localizer["field.objectType"]</label>
+                    <div class="query-type-row">
+                        <label class="query-checkbox-label">
+                            <InputCheckbox class="form-check-input" @bind-Value="queryIncludeIncomes" />
+                            <span>@Localizer["field.income"]</span>
+                        </label>
+                        <label class="query-checkbox-label">
+                            <InputCheckbox class="form-check-input" @bind-Value="queryIncludeExpenses" />
+                            <span>@Localizer["field.expense"]</span>
+                        </label>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(queryValidationMessage))
+                    {
+                        <div class="text-danger mt-1">@queryValidationMessage</div>
+                    }
+                </div>
+
+                <div>
+                    <div class="section-title-row query-contains-title-row">
+                        <label class="form-label mb-0">@Localizer["field.contains"]</label>
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="AddQueryContainsFilter">
+                            @Localizer["analysis.addContains"]
+                        </MudButton>
+                    </div>
+                    <div class="query-contains-list">
+                        @foreach (var containsFilter in queryContainsFilters.Select((value, index) => new { value, index }))
+                        {
+                            <div class="query-contains-row">
+                                <input class="form-control"
+                                       value="@containsFilter.value"
+                                       @oninput="@((ChangeEventArgs args) => UpdateQueryContainsFilter(containsFilter.index, args.Value?.ToString() ?? string.Empty))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                               Color="Color.Error"
+                                               Size="Size.Small"
+                                               Disabled="@(queryContainsFilters.Count == 1)"
+                                               aria-label="@Localizer["action.delete"]"
+                                               OnClick="@(() => RemoveQueryContainsFilter(containsFilter.index))" />
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div>
+                        <label class="form-label">@Localizer["field.greaterThanAmount"]</label>
+                        <InputNumber class="form-control" @bind-Value="queryMinimumAmount" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.lessThanAmount"]</label>
+                        <InputNumber class="form-control" @bind-Value="queryMaximumAmount" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["filter.startDate"]</label>
+                        <InputDate class="form-control" @bind-Value="queryStartDate" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["filter.endDate"]</label>
+                        <InputDate class="form-control" @bind-Value="queryEndDate" />
+                    </div>
+                </div>
+
+                <div>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               OnClick="HandleRunQueryAsync">
+                        @Localizer["analysis.runQuery"]
+                    </MudButton>
+                </div>
+            </div>
+        </section>
+
+        <section class="card-panel mt-4">
+            <div class="section-title-row">
+                <h2>@Localizer["analysis.queryResults"]</h2>
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.Delete"
+                           Disabled="@(queryResults.Count == 0)"
+                           OnClick="HandleDeleteAllQueryResultsAsync">
+                    @Localizer["action.deleteAll"]
+                </MudButton>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["field.objectType"]</th>
+                            <th>@Localizer["field.description"]</th>
+                            <th>@Localizer["field.date"]</th>
+                            <th>@Localizer["field.amount"]</th>
+                            <th>@Localizer["field.actions"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!queryResults.Any())
+                        {
+                            <tr>
+                                <td colspan="5" class="empty-state">@Localizer["analysis.noQueryResults"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var result in queryResults)
+                            {
+                                <tr>
+                                    <td>@Localizer[result.IsIncome ? "field.income" : "field.expense"]</td>
+                                    <td>@result.DisplayText</td>
+                                    <td>@result.Date.ToString("yyyyMMdd")</td>
+                                    <td>@AppState.FormatCurrency(result.Amount)</td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => HandleDeleteQueryResultAsync(result))" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+</MudTabs>
+
+@code {
+    private static readonly Regex SwishPhoneRegex = new(@"\+46\d{9}", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private string incomeFilter = string.Empty;
+    private string expenseFilter = string.Empty;
+    private string categoryFilter = string.Empty;
+    private string subcategoryFilter = string.Empty;
+    private DateTime? startDateFilter;
+    private DateTime? endDateFilter;
+    private readonly HashSet<string> expandedSwishNumbers = [];
+    private readonly Dictionary<string, string> swishNameInputs = new(StringComparer.OrdinalIgnoreCase);
+    private bool queryIncludeIncomes = true;
+    private bool queryIncludeExpenses = true;
+    private decimal? queryMinimumAmount;
+    private decimal? queryMaximumAmount;
+    private DateTime? queryStartDate;
+    private DateTime? queryEndDate;
+    private string queryValidationMessage = string.Empty;
+    private List<string> queryContainsFilters = [string.Empty];
+    private IReadOnlyList<QueryResultRow> queryResults = [];
+
+    private IReadOnlyList<TransferMatchRow> FilteredTransfers =>
+        GetTransferMatches()
+            .Where(match =>
+                string.IsNullOrWhiteSpace(incomeFilter) ||
+                match.IncomeDisplay.Contains(incomeFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(match =>
+                string.IsNullOrWhiteSpace(expenseFilter) ||
+                match.ExpenseDisplay.Contains(expenseFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(match =>
+                string.IsNullOrWhiteSpace(categoryFilter) ||
+                string.Equals(match.Category.ToString(), categoryFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(match =>
+                string.IsNullOrWhiteSpace(subcategoryFilter) ||
+                string.Equals(match.SubcategoryDisplay, subcategoryFilter, StringComparison.CurrentCultureIgnoreCase))
+            .Where(match =>
+                !startDateFilter.HasValue ||
+                match.Date >= DateOnly.FromDateTime(startDateFilter.Value))
+            .Where(match =>
+                !endDateFilter.HasValue ||
+                match.Date <= DateOnly.FromDateTime(endDateFilter.Value))
+            .OrderByDescending(match => match.Date)
+            .ThenBy(match => match.Amount)
+            .ThenBy(match => match.IncomeDisplay)
+            .ThenBy(match => match.ExpenseDisplay)
+            .ToList();
+
+    private IReadOnlyList<ExpenseCategory> CategoryOptions =>
+        GetTransferMatches()
+            .Where(match =>
+                string.IsNullOrWhiteSpace(incomeFilter) ||
+                match.IncomeDisplay.Contains(incomeFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(match =>
+                string.IsNullOrWhiteSpace(expenseFilter) ||
+                match.ExpenseDisplay.Contains(expenseFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(match =>
+                string.IsNullOrWhiteSpace(subcategoryFilter) ||
+                string.Equals(match.SubcategoryDisplay, subcategoryFilter, StringComparison.CurrentCultureIgnoreCase))
+            .Where(match =>
+                !startDateFilter.HasValue ||
+                match.Date >= DateOnly.FromDateTime(startDateFilter.Value))
+            .Where(match =>
+                !endDateFilter.HasValue ||
+                match.Date <= DateOnly.FromDateTime(endDateFilter.Value))
+            .Select(match => match.Category)
+            .Distinct()
+            .OrderBy(category => Localizer[$"expenseCategory.{category}"], StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+    private IReadOnlyList<string> SubcategoryOptions =>
+        GetTransferMatches()
+            .Where(match =>
+                string.IsNullOrWhiteSpace(incomeFilter) ||
+                match.IncomeDisplay.Contains(incomeFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(match =>
+                string.IsNullOrWhiteSpace(expenseFilter) ||
+                match.ExpenseDisplay.Contains(expenseFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(match =>
+                string.IsNullOrWhiteSpace(categoryFilter) ||
+                string.Equals(match.Category.ToString(), categoryFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(match =>
+                !startDateFilter.HasValue ||
+                match.Date >= DateOnly.FromDateTime(startDateFilter.Value))
+            .Where(match =>
+                !endDateFilter.HasValue ||
+                match.Date <= DateOnly.FromDateTime(endDateFilter.Value))
+            .Select(match => match.SubcategoryDisplay)
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .OrderBy(value => value, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+    private IReadOnlyList<SwishNumberRow> SwishNumbers =>
+        GetSwishNumberRows()
+            .OrderBy(row => string.IsNullOrWhiteSpace(row.Name) ? 1 : 0)
+            .ThenBy(row => row.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ThenBy(row => row.PhoneNumber, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    protected override void OnInitialized()
+    {
+        AppState.Changed += HandleChanged;
+        Localizer.Changed += HandleChanged;
+    }
+
+    private IReadOnlyList<TransferMatchRow> GetTransferMatches()
+    {
+        var incomesByKey = AppState.Data.IncomeRecords
+            .Where(income => income.TransactionDate.HasValue)
+            .GroupBy(income => new TransferMatchKey(income.TransactionDate!.Value, income.Amount))
+            .ToDictionary(
+                group => group.Key,
+                group => new Queue<IncomeEntry>(group
+                    .OrderBy(income => AppState.GetIncomeEntryDisplay(income), StringComparer.CurrentCultureIgnoreCase)
+                    .ThenBy(income => income.Id)));
+
+        var expensesByKey = AppState.Data.ExpenseRecords
+            .Where(expense => expense.TransactionDate.HasValue)
+            .GroupBy(expense => new TransferMatchKey(expense.TransactionDate!.Value, expense.Amount))
+            .ToDictionary(
+                group => group.Key,
+                group => new Queue<ExpenseEntry>(group
+                    .OrderBy(expense => AppState.GetExpenseDescriptionDisplay(expense), StringComparer.CurrentCultureIgnoreCase)
+                    .ThenBy(expense => expense.Id)));
+
+        var matches = new List<TransferMatchRow>();
+        foreach (var key in incomesByKey.Keys.Intersect(expensesByKey.Keys).OrderByDescending(key => key.Date).ThenBy(key => key.Amount))
+        {
+            var incomes = incomesByKey[key];
+            var expenses = expensesByKey[key];
+            while (incomes.Count > 0 && expenses.Count > 0)
+            {
+                var income = incomes.Dequeue();
+                var expense = expenses.Dequeue();
+
+                matches.Add(new TransferMatchRow(
+                    income.Id,
+                    expense.Id,
+                    AppState.GetIncomeEntryDisplay(income),
+                    AppState.GetExpenseDescriptionDisplay(expense),
+                    expense.Category,
+                    AppState.GetExpenseSubcategoryDisplay(expense),
+                    key.Date,
+                    key.Amount));
+            }
+        }
+
+        return matches;
+    }
+
+    private IReadOnlyList<SwishNumberRow> GetSwishNumberRows()
+    {
+        var transactionIndex = new Dictionary<string, List<SwishTransactionRow>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var income in AppState.Data.IncomeRecords)
+        {
+            foreach (var phoneNumber in GetSwishPhoneNumbers(AppState.GetIncomeEntryDisplay(income)))
+            {
+                AddSwishTransaction(transactionIndex, phoneNumber, new SwishTransactionRow(
+                    income.Id,
+                    true,
+                    income.TransactionDate ?? new DateOnly(income.Year, income.Month, 1),
+                    income.Amount,
+                    AppState.GetIncomeEntryDisplay(income)));
+            }
+        }
+
+        foreach (var expense in AppState.Data.ExpenseRecords)
+        {
+            foreach (var phoneNumber in GetSwishPhoneNumbers(AppState.GetExpenseDescriptionDisplay(expense)))
+            {
+                AddSwishTransaction(transactionIndex, phoneNumber, new SwishTransactionRow(
+                    expense.Id,
+                    false,
+                    expense.TransactionDate ?? new DateOnly(expense.Year, expense.Month, 1),
+                    expense.Amount,
+                    AppState.GetExpenseDescriptionDisplay(expense)));
+            }
+        }
+
+        return transactionIndex
+            .Select(pair => new SwishNumberRow(
+                pair.Key,
+                AppState.Data.SwishContacts.FirstOrDefault(contact => string.Equals(contact.PhoneNumber, pair.Key, StringComparison.OrdinalIgnoreCase))?.Name ?? string.Empty,
+                pair.Value.Count,
+                pair.Value.Sum(transaction => Math.Abs(transaction.Amount)),
+                pair.Value
+                    .OrderByDescending(transaction => transaction.Date)
+                    .ThenByDescending(transaction => transaction.IsIncome)
+                    .ThenBy(transaction => transaction.DisplayText, StringComparer.CurrentCultureIgnoreCase)
+                    .ToList()))
+            .ToList();
+    }
+
+    private static void AddSwishTransaction(Dictionary<string, List<SwishTransactionRow>> transactionIndex, string phoneNumber, SwishTransactionRow transaction)
+    {
+        if (!transactionIndex.TryGetValue(phoneNumber, out var transactions))
+        {
+            transactions = [];
+            transactionIndex[phoneNumber] = transactions;
+        }
+
+        transactions.Add(transaction);
+    }
+
+    private static IReadOnlyList<string> GetSwishPhoneNumbers(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) ||
+            text.IndexOf("swish", StringComparison.OrdinalIgnoreCase) < 0)
+        {
+            return [];
+        }
+
+        return SwishPhoneRegex.Matches(text)
+            .Select(match => match.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private void AddQueryContainsFilter()
+    {
+        queryContainsFilters.Add(string.Empty);
+    }
+
+    private void UpdateQueryContainsFilter(int index, string value)
+    {
+        if (index < 0 || index >= queryContainsFilters.Count)
+        {
+            return;
+        }
+
+        queryContainsFilters[index] = value;
+    }
+
+    private void RemoveQueryContainsFilter(int index)
+    {
+        if (queryContainsFilters.Count == 1 || index < 0 || index >= queryContainsFilters.Count)
+        {
+            return;
+        }
+
+        queryContainsFilters.RemoveAt(index);
+    }
+
+    private Task HandleRunQueryAsync()
+    {
+        queryValidationMessage = string.Empty;
+
+        if (!queryIncludeIncomes && !queryIncludeExpenses)
+        {
+            queryResults = [];
+            queryValidationMessage = Localizer["analysis.querySelectTypeValidation"];
+            return Task.CompletedTask;
+        }
+
+        queryResults = BuildQueryResults();
+        return Task.CompletedTask;
+    }
+
+    private IReadOnlyList<QueryResultRow> BuildQueryResults()
+    {
+        var containsFilters = queryContainsFilters
+            .Select(value => value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        var results = new List<QueryResultRow>();
+
+        if (queryIncludeIncomes)
+        {
+            results.AddRange(AppState.Data.IncomeRecords
+                .Select(income => new QueryResultRow(
+                    income.Id,
+                    true,
+                    ResolveQueryDate(income.TransactionDate, income.Year, income.Month),
+                    income.Amount,
+                    AppState.GetIncomeEntryDisplay(income)))
+                .Where(result => QueryResultMatches(result, containsFilters)));
+        }
+
+        if (queryIncludeExpenses)
+        {
+            results.AddRange(AppState.Data.ExpenseRecords
+                .Select(expense => new QueryResultRow(
+                    expense.Id,
+                    false,
+                    ResolveQueryDate(expense.TransactionDate, expense.Year, expense.Month),
+                    expense.Amount,
+                    AppState.GetExpenseDescriptionDisplay(expense)))
+                .Where(result => QueryResultMatches(result, containsFilters)));
+        }
+
+        return results
+            .OrderByDescending(result => result.Date)
+            .ThenByDescending(result => result.Amount)
+            .ThenBy(result => result.DisplayText, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
+
+    private bool QueryResultMatches(QueryResultRow result, IReadOnlyList<string> containsFilters)
+    {
+        if (queryMinimumAmount.HasValue && result.Amount <= queryMinimumAmount.Value)
+        {
+            return false;
+        }
+
+        if (queryMaximumAmount.HasValue && result.Amount >= queryMaximumAmount.Value)
+        {
+            return false;
+        }
+
+        if (queryStartDate.HasValue && result.Date < DateOnly.FromDateTime(queryStartDate.Value))
+        {
+            return false;
+        }
+
+        if (queryEndDate.HasValue && result.Date > DateOnly.FromDateTime(queryEndDate.Value))
+        {
+            return false;
+        }
+
+        return containsFilters.All(filter =>
+            result.DisplayText.Contains(filter, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static DateOnly ResolveQueryDate(DateOnly? transactionDate, int year, int month) =>
+        transactionDate ?? new DateOnly(year, month, 1);
+
+    private async Task HandleDeleteQueryResultAsync(QueryResultRow result)
+    {
+        if (result.IsIncome)
+        {
+            await AppState.RemoveIncomeAsync(result.TransactionId, false);
+        }
+        else
+        {
+            await AppState.RemoveExpenseAsync(result.TransactionId);
+        }
+
+        queryResults = BuildQueryResults();
+    }
+
+    private async Task HandleDeleteAllQueryResultsAsync()
+    {
+        if (queryResults.Count == 0)
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["action.deleteAll"] },
+            { dialog => dialog.Message, string.Format(Localizer["analysis.queryDeleteAllMessage"], queryResults.Count) },
+            { dialog => dialog.ConfirmText, Localizer["action.deleteAll"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["action.deleteAll"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        foreach (var queryResult in queryResults.ToList())
+        {
+            if (queryResult.IsIncome)
+            {
+                await AppState.RemoveIncomeAsync(queryResult.TransactionId, false);
+            }
+            else
+            {
+                await AppState.RemoveExpenseAsync(queryResult.TransactionId);
+            }
+        }
+
+        queryResults = [];
+    }
+
+    private async Task HandleDeleteTransferAsync(TransferMatchRow transfer)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, Localizer["analysis.deleteTransferMessage"] },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveTransferAsync(transfer.IncomeId, transfer.ExpenseId);
+    }
+
+    private async Task HandleDeleteFilteredTransfersAsync()
+    {
+        if (FilteredTransfers.Count == 0)
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["action.deleteAll"] },
+            { dialog => dialog.Message, string.Format(Localizer["analysis.deleteFilteredTransfersMessage"], FilteredTransfers.Count) },
+            { dialog => dialog.ConfirmText, Localizer["action.deleteAll"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["action.deleteAll"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        foreach (var transfer in FilteredTransfers.ToList())
+        {
+            await AppState.RemoveTransferAsync(transfer.IncomeId, transfer.ExpenseId);
+        }
+    }
+
+    private bool IsSwishExpanded(string phoneNumber) => expandedSwishNumbers.Contains(phoneNumber);
+
+    private void ToggleSwishExpanded(string phoneNumber)
+    {
+        if (!expandedSwishNumbers.Add(phoneNumber))
+        {
+            expandedSwishNumbers.Remove(phoneNumber);
+        }
+    }
+
+    private string GetSwishNameInput(string phoneNumber)
+    {
+        if (swishNameInputs.TryGetValue(phoneNumber, out var value))
+        {
+            return value;
+        }
+
+        var name = AppState.Data.SwishContacts
+            .FirstOrDefault(contact => string.Equals(contact.PhoneNumber, phoneNumber, StringComparison.OrdinalIgnoreCase))
+            ?.Name ?? string.Empty;
+
+        swishNameInputs[phoneNumber] = name;
+        return name;
+    }
+
+    private void SetSwishNameInput(string phoneNumber, string value)
+    {
+        swishNameInputs[phoneNumber] = value;
+    }
+
+    private async Task HandleSaveSwishNameAsync(string phoneNumber)
+    {
+        await AppState.SaveSwishContactNameAsync(phoneNumber, GetSwishNameInput(phoneNumber));
+        Snackbar.Add(Localizer["analysis.swishNameSaved"], Severity.Success);
+    }
+
+    private async Task HandleCopyPhoneNumberAsync(string phoneNumber)
+    {
+        await JSRuntime.InvokeVoidAsync("budgetAdvisor.clipboard.copyText", phoneNumber);
+    }
+
+    private async Task HandleDeleteSwishTransactionAsync(SwishTransactionRow transaction)
+    {
+        if (transaction.IsIncome)
+        {
+            await AppState.RemoveIncomeAsync(transaction.TransactionId, false);
+            return;
+        }
+
+        await AppState.RemoveExpenseAsync(transaction.TransactionId);
+    }
+
+    private async Task HandleDeleteSwishNumberAsync(SwishNumberRow swish)
+    {
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["dialog.deleteTitle"] },
+            { dialog => dialog.Message, string.Format(Localizer["analysis.deleteSwishNumberMessage"], swish.PhoneNumber) },
+            { dialog => dialog.ConfirmText, Localizer["action.delete"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["dialog.deleteTitle"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        await AppState.RemoveSwishContactAndTransactionsAsync(swish.PhoneNumber);
+        expandedSwishNumbers.Remove(swish.PhoneNumber);
+        swishNameInputs.Remove(swish.PhoneNumber);
+    }
+
+    private void HandleChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        AppState.Changed -= HandleChanged;
+        Localizer.Changed -= HandleChanged;
+    }
+
+    private sealed record TransferMatchKey(DateOnly Date, decimal Amount);
+
+    private sealed record TransferMatchRow(
+        Guid IncomeId,
+        Guid ExpenseId,
+        string IncomeDisplay,
+        string ExpenseDisplay,
+        ExpenseCategory Category,
+        string SubcategoryDisplay,
+        DateOnly Date,
+        decimal Amount);
+
+    private sealed record SwishNumberRow(
+        string PhoneNumber,
+        string Name,
+        int TransactionCount,
+        decimal Turnover,
+        IReadOnlyList<SwishTransactionRow> Transactions);
+
+    private sealed record SwishTransactionRow(
+        Guid TransactionId,
+        bool IsIncome,
+        DateOnly Date,
+        decimal Amount,
+        string DisplayText);
+
+    private sealed record QueryResultRow(
+        Guid TransactionId,
+        bool IsIncome,
+        DateOnly Date,
+        decimal Amount,
+        string DisplayText);
+}
+
+<style>
+    .analysis-tab-with-image {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .analysis-tab-image {
+        width: 1.1rem;
+        height: 1.1rem;
+        object-fit: contain;
+    }
+
+    .swish-name-row {
+        display: flex;
+        align-items: end;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .swish-name-input-shell {
+        min-width: min(22rem, 100%);
+        flex: 1 1 18rem;
+    }
+
+    .query-form-shell {
+        display: grid;
+        gap: 1rem;
+    }
+
+    .query-type-row {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+
+    .query-checkbox-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .query-contains-title-row {
+        gap: 1rem;
+    }
+
+    .query-contains-list {
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .query-contains-row {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+    }
+</style>

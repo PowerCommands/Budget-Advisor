@@ -71,21 +71,23 @@
         </header>
 
         <nav class="tab-bar">
-            <MudTabs Class="nav-tabs-shell"
+                <MudTabs Class="nav-tabs-shell"
                      ActivePanelIndex="@GetCurrentTabIndex()"
                      ActivePanelIndexChanged="HandleTabChangedAsync"
                      Rounded="true"
                      SliderColor="Color.Primary"
                      Elevation="0">
                 <MudTabPanel Text="@Localizer["nav.start"]" Icon="@Icons.Material.Filled.SpaceDashboard" />
+                <MudTabPanel Text="@Localizer["nav.analysis"]" Icon="@Icons.Material.Filled.Search" />
                 <MudTabPanel Text="@Localizer["nav.household"]" Icon="@Icons.Material.Filled.Groups" />
                 <MudTabPanel Text="@Localizer["nav.housingTab"]" Icon="@Icons.Material.Filled.HomeWork" />
                 <MudTabPanel Text="@Localizer["nav.transport"]" Icon="@Icons.Material.Filled.DirectionsCar" />
                 <MudTabPanel Text="@Localizer["nav.expenses"]" Icon="@Icons.Material.Filled.ReceiptLong" />
                 <MudTabPanel Text="@Localizer["nav.credits"]" Icon="@Icons.Material.Filled.CreditCard" />
                 <MudTabPanel Text="@Localizer["nav.savings"]" Icon="@Icons.Material.Filled.Savings" />
-                <MudTabPanel Text="@Localizer["nav.assets"]" Icon="@Icons.Material.Filled.AccountBalanceWallet" />
+                <MudTabPanel Text="@Localizer["nav.import"]" Icon="@Icons.Material.Filled.UploadFile" />
                 <MudTabPanel Text="@Localizer["nav.settings"]" Icon="@Icons.Material.Filled.Settings" />
+                <MudTabPanel Text="@Localizer["nav.help"]" Icon="@Icons.Material.Filled.Help" />
             </MudTabs>
         </nav>
 
@@ -217,15 +219,17 @@
         return relativePath.ToLowerInvariant() switch
         {
             "" => Localizer["nav.start"],
+            "analysis" => Localizer["nav.analysis"],
             "household" => Localizer["nav.household"],
             "housing" => Localizer["nav.housingTab"],
             "transport" => Localizer["nav.transport"],
             "expenses" => Localizer["nav.expenses"],
             "credits" or "debts" => Localizer["nav.credits"],
             "savings" => Localizer["nav.savings"],
-            "assets" => Localizer["nav.assets"],
+            "import" => Localizer["nav.import"],
             "tools" => Localizer["nav.settings"],
             "settings" => Localizer["nav.settings"],
+            "help" => Localizer["nav.help"],
             _ => Localizer["common.notFound"]
         };
     }
@@ -258,14 +262,16 @@
         return relativePath.ToLowerInvariant() switch
         {
             "" => 0,
-            "household" => 1,
-            "housing" => 2,
-            "transport" => 3,
-            "expenses" => 4,
-            "credits" or "debts" => 5,
-            "savings" => 6,
-            "assets" => 7,
-            "tools" or "settings" => 8,
+            "analysis" => 1,
+            "household" => 2,
+            "housing" => 3,
+            "transport" => 4,
+            "expenses" => 5,
+            "credits" or "debts" => 6,
+            "savings" => 7,
+            "import" => 8,
+            "tools" or "settings" => 9,
+            "help" => 10,
             _ => 0
         };
     }
@@ -275,14 +281,16 @@
         var targetUri = tabIndex switch
         {
             0 => "",
-            1 => "household",
-            2 => "housing",
-            3 => "transport",
-            4 => "expenses",
-            5 => "credits",
-            6 => "savings",
-            7 => "assets",
-            8 => "settings",
+            1 => "analysis",
+            2 => "household",
+            3 => "housing",
+            4 => "transport",
+            5 => "expenses",
+            6 => "credits",
+            7 => "savings",
+            8 => "import",
+            9 => "settings",
+            10 => "help",
             _ => ""
         };
 
