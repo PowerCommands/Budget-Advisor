@@ -1,6 +1,8 @@
 @page "/import"
+@using System.ComponentModel.DataAnnotations
 @using System.Text
 @using BudgetAdvisor.App.Imports
+@using BudgetAdvisor.Domain.Enums
 @using Microsoft.AspNetCore.Components.Forms
 @implements IDisposable
 @inject ApplicationState AppState
@@ -13,116 +15,295 @@
     <div class="status-banner">@statusMessage</div>
 }
 
-<section class="card-panel">
-    <div class="d-flex flex-column align-items-start gap-3">
-        <MudButton HtmlTag="label"
-                   Variant="Variant.Filled"
-                   Color="Color.Primary"
-                   StartIcon="@Icons.Material.Filled.UploadFile">
-            @Localizer["expenses.import.uploadFile"]
-            <InputFile OnChange="HandleSwedbankFileSelectedAsync" accept=".csv,text/csv" hidden />
-        </MudButton>
+<MudTabs Class="section-tabs" Rounded="true" SliderColor="Color.Primary" Elevation="0">
+    <MudTabPanel Text="@Localizer["expenses.import.tab.import"]" Icon="@Icons.Material.Filled.UploadFile">
+        <section class="card-panel mt-4">
+            <div class="d-flex flex-column align-items-start gap-3">
+                <MudButton HtmlTag="label"
+                           Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.UploadFile">
+                    @Localizer["expenses.import.uploadFile"]
+                    <InputFile OnChange="HandleSwedbankFileSelectedAsync" accept=".csv,text/csv" hidden />
+                </MudButton>
 
-        <div class="d-flex flex-column gap-2 align-self-stretch w-100">
-            <span class="section-note d-block">@Localizer["expenses.import.supportedBanks"]</span>
-            <div class="bank-import-supported-banks">
-                <img src="images/import-swedbank.svg" alt="Swedbank" class="bank-import-provider-logo" />
-                <img src="images/import-nordea.svg" alt="Nordea" class="bank-import-provider-logo" />
-                <img src="images/import-seb.svg" alt="SEB" class="bank-import-provider-logo" />
+                <div class="d-flex flex-column gap-2 align-self-stretch w-100">
+                    <span class="section-note d-block">@Localizer["expenses.import.supportedBanks"]</span>
+                    <div class="bank-import-supported-banks">
+                        <img src="images/import-swedbank.svg" alt="Swedbank" class="bank-import-provider-logo" />
+                        <img src="images/import-nordea.svg" alt="Nordea" class="bank-import-provider-logo" />
+                        <img src="images/import-seb.svg" alt="SEB" class="bank-import-provider-logo" />
+                    </div>
+                </div>
             </div>
-        </div>
-    </div>
-</section>
+        </section>
+    </MudTabPanel>
 
-<section class="card-panel mt-4">
-    <div class="section-title-row">
-        <h2>@Localizer["expenses.import.logTitle"]</h2>
-    </div>
-
-    @if (isAssigningImportMember && assigningImportMemberTotalCount > 0)
-    {
-        <div class="mb-3">
-            <MudProgressLinear Value="@ImportMemberAssignmentProgressValue"
-                               Color="Color.Primary"
-                               Rounded="true"
-                               Size="Size.Large" />
-            <div class="d-flex justify-content-between align-items-center mt-2">
-                <span>@string.Format(Localizer["expenses.import.memberUpdateProgress"], assigningImportMemberProcessedCount, assigningImportMemberTotalCount)</span>
-                <span>@($"{ImportMemberAssignmentProgressValue:0}%")</span>
+    <MudTabPanel Text="@Localizer["expenses.import.tab.log"]" Icon="@Icons.Material.Filled.History">
+        <section class="card-panel mt-4">
+            <div class="section-title-row">
+                <h2>@Localizer["expenses.import.logTitle"]</h2>
             </div>
-        </div>
-    }
 
-    <div class="table-responsive">
-        <table class="table app-table">
-            <thead>
-                <tr>
-                    <th>@Localizer["field.date"]</th>
-                    <th>@Localizer["field.records"]</th>
-                    <th>@Localizer["field.member"]</th>
-                    <th>@Localizer["field.actions"]</th>
-                </tr>
-            </thead>
-            <tbody>
-                @if (TransactionImportBatches.Count == 0)
-                {
-                    <tr>
-                        <td colspan="4">@Localizer["expenses.import.noImportLogEntries"]</td>
-                    </tr>
-                }
-                else
-                {
-                    @foreach (var importBatch in TransactionImportBatches)
-                    {
+            @if (isAssigningImportMember && assigningImportMemberTotalCount > 0)
+            {
+                <div class="mb-3">
+                    <MudProgressLinear Value="@ImportMemberAssignmentProgressValue"
+                                       Color="Color.Primary"
+                                       Rounded="true"
+                                       Size="Size.Large" />
+                    <div class="d-flex justify-content-between align-items-center mt-2">
+                        <span>@string.Format(Localizer["expenses.import.memberUpdateProgress"], assigningImportMemberProcessedCount, assigningImportMemberTotalCount)</span>
+                        <span>@($"{ImportMemberAssignmentProgressValue:0}%")</span>
+                    </div>
+                </div>
+            }
+
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
                         <tr>
-                            <td>@FormatImportTimestamp(importBatch.ImportedAtUtc)</td>
-                            <td>@importBatch.ImportedRecordCount</td>
-                            <td>
-                                <div class="button-row income-action-row">
-                                    <button class="btn btn-outline-secondary btn-sm member-initial-button"
-                                            title="@Localizer["expenses.import.noMember"]"
-                                            disabled="@(isAssigningImportMember || !importBatch.MemberId.HasValue)"
-                                            @onclick="() => HandleAssignImportMemberAsync(importBatch, null)">
-                                        -
-                                    </button>
-                                    @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
-                                    {
-                                        <button class="btn btn-outline-primary btn-sm member-initial-button"
-                                                title="@member.Name"
-                                                disabled="@(isAssigningImportMember || importBatch.MemberId == member.Id)"
-                                                @onclick="() => HandleAssignImportMemberAsync(importBatch, member.Id)">
-                                            @GetMemberInitials(member)
-                                        </button>
-                                    }
-                                </div>
-                            </td>
-                            <td>
-                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                               Color="Color.Error"
-                                               Size="Size.Small"
-                                               title="@Localizer["expenses.import.deleteImport"]"
-                                               aria-label="@Localizer["expenses.import.deleteImport"]"
-                                               Disabled="@isAssigningImportMember"
-                                               OnClick="@(() => HandleDeleteImportAsync(importBatch))" />
-                            </td>
+                            <th>@Localizer["field.date"]</th>
+                            <th>@Localizer["field.records"]</th>
+                            <th>@Localizer["field.member"]</th>
+                            <th>@Localizer["field.actions"]</th>
                         </tr>
-                    }
-                }
-            </tbody>
-        </table>
-    </div>
-</section>
+                    </thead>
+                    <tbody>
+                        @if (TransactionImportBatches.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="4">@Localizer["expenses.import.noImportLogEntries"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var importBatch in TransactionImportBatches)
+                            {
+                                <tr>
+                                    <td>@FormatImportTimestamp(importBatch.ImportedAtUtc)</td>
+                                    <td>@importBatch.ImportedRecordCount</td>
+                                    <td>
+                                        <div class="button-row income-action-row">
+                                            <button class="btn btn-outline-secondary btn-sm member-initial-button"
+                                                    title="@Localizer["expenses.import.noMember"]"
+                                                    disabled="@(isAssigningImportMember || !importBatch.MemberId.HasValue)"
+                                                    @onclick="() => HandleAssignImportMemberAsync(importBatch, null)">
+                                                -
+                                            </button>
+                                            @foreach (var member in AppState.Data.Members.OrderBy(member => member.Name))
+                                            {
+                                                <button class="btn btn-outline-primary btn-sm member-initial-button"
+                                                        title="@member.Name"
+                                                        disabled="@(isAssigningImportMember || importBatch.MemberId == member.Id)"
+                                                        @onclick="() => HandleAssignImportMemberAsync(importBatch, member.Id)">
+                                                    @GetMemberInitials(member)
+                                                </button>
+                                            }
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       title="@Localizer["expenses.import.deleteImport"]"
+                                                       aria-label="@Localizer["expenses.import.deleteImport"]"
+                                                       Disabled="@isAssigningImportMember"
+                                                       OnClick="@(() => HandleDeleteImportAsync(importBatch))" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+
+    <MudTabPanel Text="@Localizer["expenses.import.tab.settings"]" Icon="@Icons.Material.Filled.Settings">
+        <section class="card-panel mt-4">
+            <h2>@Localizer["expenses.import.settingsTitle"]</h2>
+            <EditForm EditContext="ruleEditContext" OnValidSubmit="HandleAddSuggestionAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <div class="form-grid">
+                    <div>
+                        <label class="form-label">@Localizer["field.description"]</label>
+                        <InputText class="form-control" @bind-Value="ruleForm.Description" />
+                        <ValidationMessage For="() => ruleForm.Description" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["expenses.import.matchType"]</label>
+                        <InputSelect class="form-select" @bind-Value="ruleForm.MatchType">
+                            @foreach (var matchType in MatchTypeOptions)
+                            {
+                                <option value="@matchType">@GetMatchTypeLabel(matchType)</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["expenses.import.ruleAction"]</label>
+                        <InputSelect class="form-select" @bind-Value="ruleForm.Action">
+                            @foreach (var action in ActionOptions)
+                            {
+                                <option value="@action">@GetRuleActionLabel(action)</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.mainCategory"]</label>
+                        <InputSelect class="form-select" @bind-Value="ruleForm.MainCategory">
+                            <option value="">@Localizer["filter.allCategories"]</option>
+                            @foreach (var category in SuggestionMainCategories)
+                            {
+                                <option value="@category">@GetMainCategoryLabel(category)</option>
+                            }
+                        </InputSelect>
+                        <ValidationMessage For="() => ruleForm.MainCategory" />
+                    </div>
+                    <div>
+                        <label class="form-label">@Localizer["field.subcategory"]</label>
+                        <InputText class="form-control"
+                                   @bind-Value="ruleForm.Subcategory"
+                                   list="import-suggestion-subcategories"
+                                   disabled="@(ruleForm.Action == ImportSuggestionAction.HideRow || !ruleForm.MainCategory.HasValue)" />
+                        <datalist id="import-suggestion-subcategories">
+                            @foreach (var subcategory in GetManualSubcategorySuggestions())
+                            {
+                                <option value="@subcategory"></option>
+                            }
+                        </datalist>
+                        <ValidationMessage For="() => ruleForm.Subcategory" />
+                    </div>
+                </div>
+                <button class="btn btn-primary mt-3" type="submit">@Localizer["action.create"]</button>
+            </EditForm>
+        </section>
+
+        <section class="card-panel mt-4">
+            <div class="section-title-row">
+                <h2>@Localizer["expenses.import.savedSuggestionsTitle"]</h2>
+                <MudButton Variant="Variant.Outlined"
+                           Color="Color.Error"
+                           StartIcon="@Icons.Material.Filled.DeleteSweep"
+                           Disabled="@(FilteredImportedSuggestions.Count == 0)"
+                           OnClick="HandleDeleteFilteredSuggestionsAsync">
+                    @Localizer["action.deleteAll"]
+                </MudButton>
+            </div>
+            <div class="form-grid mb-3">
+                <div>
+                    <label class="form-label">@Localizer["field.description"]</label>
+                    <InputText class="form-control" @bind-Value="suggestionDescriptionFilter" />
+                </div>
+                <div>
+                    <label class="form-label">@Localizer["expenses.import.matchType"]</label>
+                    <InputSelect class="form-select" @bind-Value="suggestionMatchTypeFilter">
+                        <option value="">@Localizer["filter.allCategories"]</option>
+                        @foreach (var matchType in MatchTypeOptions)
+                        {
+                            <option value="@matchType.ToString()">@GetMatchTypeLabel(matchType)</option>
+                        }
+                    </InputSelect>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table app-table">
+                    <thead>
+                        <tr>
+                            <th>@Localizer["field.description"]</th>
+                            <th>@Localizer["field.category"]</th>
+                            <th>@Localizer["expenses.import.matchType"]</th>
+                            <th>@Localizer["expenses.import.ruleAction"]</th>
+                            <th>@Localizer["field.actions"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (FilteredImportedSuggestions.Count == 0)
+                        {
+                            <tr>
+                                <td colspan="5">@Localizer["expenses.import.noSavedSuggestions"]</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var suggestion in FilteredImportedSuggestions)
+                            {
+                                <tr>
+                                    <td>@suggestion.Description</td>
+                                    <td>@GetSuggestionCategoryDisplay(suggestion)</td>
+                                    <td>@GetMatchTypeLabel(suggestion.MatchType)</td>
+                                    <td>@GetRuleActionLabel(suggestion.Action)</td>
+                                    <td>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => HandleDeleteSuggestionAsync(suggestion.Id))" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </MudTabPanel>
+</MudTabs>
 
 @code {
+    private static IReadOnlyList<ImportSuggestionMatchType> MatchTypeOptions { get; } =
+    [
+        ImportSuggestionMatchType.Exact,
+        ImportSuggestionMatchType.Contains
+    ];
+
+    private static IReadOnlyList<ImportSuggestionAction> ActionOptions { get; } =
+    [
+        ImportSuggestionAction.ApplySuggestion,
+        ImportSuggestionAction.HideRow
+    ];
+
+    private static IReadOnlyList<SubcategoryMainCategory> SuggestionMainCategories { get; } =
+    [
+        SubcategoryMainCategory.Food,
+        SubcategoryMainCategory.Housing,
+        SubcategoryMainCategory.Transport,
+        SubcategoryMainCategory.Clothing,
+        SubcategoryMainCategory.Other
+    ];
+
     private string? statusMessage;
     private bool isAssigningImportMember;
     private int assigningImportMemberProcessedCount;
     private int assigningImportMemberTotalCount;
+    private ImportSuggestionFormModel ruleForm = new();
+    private EditContext ruleEditContext = default!;
+    private string suggestionDescriptionFilter = string.Empty;
+    private string suggestionMatchTypeFilter = string.Empty;
     private const int ImportMemberProgressBatchSize = 25;
 
     private IReadOnlyList<TransactionImportBatch> TransactionImportBatches =>
         AppState.TransactionImportData.ImportBatches
             .OrderByDescending(batch => batch.ImportedAtUtc)
+            .ToList();
+
+    private IReadOnlyList<ImportedExpenseCategorySuggestion> ImportedSuggestions =>
+        AppState.TransactionImportData.ImportedExpenseCategorySuggestions
+            .OrderBy(suggestion => suggestion.Description, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(suggestion => suggestion.MatchType)
+            .ThenBy(suggestion => suggestion.Action)
+            .ThenBy(suggestion => suggestion.Category)
+            .ThenBy(suggestion => suggestion.Subcategory, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private IReadOnlyList<ImportedExpenseCategorySuggestion> FilteredImportedSuggestions =>
+        ImportedSuggestions
+            .Where(suggestion =>
+                string.IsNullOrWhiteSpace(suggestionDescriptionFilter) ||
+                suggestion.Description.Contains(suggestionDescriptionFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+            .Where(suggestion =>
+                string.IsNullOrWhiteSpace(suggestionMatchTypeFilter) ||
+                string.Equals(suggestion.MatchType.ToString(), suggestionMatchTypeFilter, StringComparison.Ordinal))
             .ToList();
 
     private double ImportMemberAssignmentProgressValue =>
@@ -132,6 +313,7 @@
 
     protected override void OnInitialized()
     {
+        ruleEditContext = new EditContext(ruleForm);
         AppState.Changed += HandleChanged;
         Localizer.Changed += HandleChanged;
     }
@@ -253,6 +435,79 @@
         }
     }
 
+    private async Task HandleAddSuggestionAsync()
+    {
+        var suggestion = new ImportedExpenseCategorySuggestion
+        {
+            Description = ruleForm.Description,
+            MatchType = ruleForm.MatchType,
+            Action = ruleForm.Action,
+            Category = ruleForm.Action == ImportSuggestionAction.ApplySuggestion
+                ? MapMainCategoryToExpenseCategory(ruleForm.MainCategory!.Value)
+                : ExpenseCategory.Other,
+            Subcategory = ruleForm.Action == ImportSuggestionAction.ApplySuggestion
+                ? ruleForm.Subcategory
+                : string.Empty
+        };
+
+        await AppState.SaveImportedExpenseCategorySuggestionsAsync([suggestion]);
+        ruleForm = new ImportSuggestionFormModel();
+        ruleEditContext = new EditContext(ruleForm);
+        statusMessage = Localizer["expenses.import.ruleAdded"];
+    }
+
+    private async Task HandleDeleteSuggestionAsync(Guid suggestionId)
+    {
+        await AppState.RemoveImportedExpenseCategorySuggestionAsync(suggestionId);
+        statusMessage = Localizer["expenses.import.ruleDeleted"];
+    }
+
+    private async Task HandleDeleteFilteredSuggestionsAsync()
+    {
+        if (FilteredImportedSuggestions.Count == 0)
+        {
+            return;
+        }
+
+        var parameters = new DialogParameters<ConfirmDialog>
+        {
+            { dialog => dialog.Title, Localizer["action.deleteAll"] },
+            { dialog => dialog.Message, string.Format(Localizer["expenses.import.deleteFilteredRulesMessage"], FilteredImportedSuggestions.Count) },
+            { dialog => dialog.ConfirmText, Localizer["action.deleteAll"] },
+            { dialog => dialog.CancelText, Localizer["action.cancel"] },
+            { dialog => dialog.ConfirmColor, Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["action.deleteAll"], parameters);
+        if (dialog is null)
+        {
+            return;
+        }
+
+        var result = await dialog.Result;
+        if (result?.Canceled ?? true)
+        {
+            return;
+        }
+
+        var remainingSuggestions = ImportedSuggestions
+            .Where(suggestion => !FilteredImportedSuggestions.Any(filtered => filtered.Id == suggestion.Id))
+            .ToList();
+
+        await AppState.SetImportedExpenseCategorySuggestionsAsync(remainingSuggestions);
+        statusMessage = string.Format(Localizer["expenses.import.deletedFilteredRules"], FilteredImportedSuggestions.Count);
+    }
+
+    private IReadOnlyList<string> GetManualSubcategorySuggestions()
+    {
+        if (!ruleForm.MainCategory.HasValue)
+        {
+            return [];
+        }
+
+        return AppState.GetExpenseSubcategorySuggestions(MapMainCategoryToExpenseCategory(ruleForm.MainCategory.Value));
+    }
+
     private static string FormatImportTimestamp(DateTime timestampUtc) =>
         timestampUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
 
@@ -260,6 +515,52 @@
         memberId.HasValue
             ? AppState.Data.Members.FirstOrDefault(member => member.Id == memberId.Value)?.Name ?? Localizer["common.unknown"]
             : Localizer["expenses.import.noMember"];
+
+    private string GetSuggestionCategoryDisplay(ImportedExpenseCategorySuggestion suggestion)
+    {
+        if (suggestion.Action == ImportSuggestionAction.HideRow)
+        {
+            return "-";
+        }
+
+        return $"{GetMainCategoryLabel(MapExpenseCategoryToMainCategory(suggestion.Category))} / {suggestion.Subcategory}";
+    }
+
+    private string GetMatchTypeLabel(ImportSuggestionMatchType matchType) => matchType switch
+    {
+        ImportSuggestionMatchType.Contains => Localizer["expenses.import.matchType.Contains"],
+        _ => Localizer["expenses.import.matchType.Exact"]
+    };
+
+    private string GetRuleActionLabel(ImportSuggestionAction action) => action switch
+    {
+        ImportSuggestionAction.HideRow => Localizer["expenses.import.ruleAction.HideRow"],
+        _ => Localizer["expenses.import.ruleAction.ApplySuggestion"]
+    };
+
+    private string GetMainCategoryLabel(SubcategoryMainCategory mainCategory) => mainCategory switch
+    {
+        SubcategoryMainCategory.Income => Localizer["subcategoryMainCategory.Income"],
+        _ => Localizer[$"expenseCategory.{MapMainCategoryToExpenseCategory(mainCategory)}"]
+    };
+
+    private static ExpenseCategory MapMainCategoryToExpenseCategory(SubcategoryMainCategory mainCategory) => mainCategory switch
+    {
+        SubcategoryMainCategory.Food => ExpenseCategory.Food,
+        SubcategoryMainCategory.Housing => ExpenseCategory.Housing,
+        SubcategoryMainCategory.Transport => ExpenseCategory.Transport,
+        SubcategoryMainCategory.Clothing => ExpenseCategory.Clothing,
+        _ => ExpenseCategory.Other
+    };
+
+    private static SubcategoryMainCategory MapExpenseCategoryToMainCategory(ExpenseCategory category) => category switch
+    {
+        ExpenseCategory.Food => SubcategoryMainCategory.Food,
+        ExpenseCategory.Housing => SubcategoryMainCategory.Housing,
+        ExpenseCategory.Transport => SubcategoryMainCategory.Transport,
+        ExpenseCategory.Clothing => SubcategoryMainCategory.Clothing,
+        _ => SubcategoryMainCategory.Other
+    };
 
     private static string GetMemberInitials(HouseholdMember member)
     {
@@ -312,5 +613,37 @@
         }
 
         return Encoding.Latin1.GetString(bytes);
+    }
+
+    private sealed class ImportSuggestionFormModel : IValidatableObject
+    {
+        [Required(ErrorMessage = "Description is required.")]
+        public string Description { get; set; } = string.Empty;
+
+        public ImportSuggestionMatchType MatchType { get; set; } = ImportSuggestionMatchType.Exact;
+
+        public ImportSuggestionAction Action { get; set; } = ImportSuggestionAction.ApplySuggestion;
+
+        public SubcategoryMainCategory? MainCategory { get; set; }
+
+        public string Subcategory { get; set; } = string.Empty;
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (Action == ImportSuggestionAction.HideRow)
+            {
+                yield break;
+            }
+
+            if (!MainCategory.HasValue)
+            {
+                yield return new ValidationResult("Main category is required.", [nameof(MainCategory)]);
+            }
+
+            if (string.IsNullOrWhiteSpace(Subcategory))
+            {
+                yield return new ValidationResult("Subcategory is required.", [nameof(Subcategory)]);
+            }
+        }
     }
 }

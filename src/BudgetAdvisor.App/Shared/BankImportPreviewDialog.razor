@@ -313,6 +313,7 @@
     private bool isImporting;
     private bool hasStartedPreparing;
     private bool showAllRows;
+    private bool showSavedHiddenRows;
     private int preparedCount;
     private int totalTransactionCount;
     private int totalSelectedCount;
@@ -339,6 +340,7 @@
                 row.Description.Contains(descriptionFilter.Trim(), StringComparison.OrdinalIgnoreCase))
             .Where(row => showAllRows || !row.IsAlreadyImported)
             .Where(row => !hiddenDescriptions.Contains(GetDescriptionKey(row.Description)))
+            .Where(row => showSavedHiddenRows || !MatchesSavedHideSuggestion(row.Description))
             .ToList();
 
     protected override void OnInitialized()
@@ -405,7 +407,9 @@
             {
                 Description = row.Description,
                 Category = MapMainCategoryToExpenseCategory(row.MainCategory),
-                Subcategory = row.Subcategory
+                Subcategory = row.Subcategory,
+                MatchType = ImportSuggestionMatchType.Exact,
+                Action = ImportSuggestionAction.ApplySuggestion
             })
             .ToList();
 
@@ -538,6 +542,7 @@
 
     private Task HideMatchingRows(ImportPreviewRowModel row)
     {
+        showSavedHiddenRows = false;
         hiddenDescriptions.Add(GetDescriptionKey(row.Description));
         RefreshSelectAllRows();
         return InvokeAsync(StateHasChanged);
@@ -545,6 +550,7 @@
 
     private Task ShowAllHiddenRows()
     {
+        showSavedHiddenRows = true;
         hiddenDescriptions.Clear();
         RefreshSelectAllRows();
         return InvokeAsync(StateHasChanged);
@@ -610,7 +616,8 @@
             .Concat(
                 AppState.TransactionImportData.ImportedExpenseCategorySuggestions
                     .Where(_ => row.IsExpense)
-                    .Where(candidate => string.Equals(GetDescriptionKey(candidate.Description), GetDescriptionKey(row.Description), StringComparison.OrdinalIgnoreCase))
+                    .Where(candidate => candidate.Action == ImportSuggestionAction.ApplySuggestion)
+                    .Where(candidate => SuggestionMatchesDescription(candidate, row.Description))
                     .Select(candidate => new ApplyCategorySuggestion(MapExpenseCategoryToMainCategory(candidate.Category), candidate.Subcategory.Trim())))
             .Distinct()
             .OrderBy(candidate => candidate.MainCategory)
@@ -633,6 +640,26 @@
         string.IsNullOrWhiteSpace(description)
             ? string.Empty
             : description.Trim().Normalize(NormalizationForm.FormKC);
+
+    private bool MatchesSavedHideSuggestion(string description) =>
+        AppState.TransactionImportData.ImportedExpenseCategorySuggestions
+            .Where(suggestion => suggestion.Action == ImportSuggestionAction.HideRow)
+            .Any(suggestion => SuggestionMatchesDescription(suggestion, description));
+
+    private static bool SuggestionMatchesDescription(ImportedExpenseCategorySuggestion suggestion, string description)
+    {
+        var suggestionKey = GetDescriptionKey(suggestion.Description);
+        var descriptionKey = GetDescriptionKey(description);
+
+        if (string.IsNullOrWhiteSpace(suggestionKey) || string.IsNullOrWhiteSpace(descriptionKey))
+        {
+            return false;
+        }
+
+        return suggestion.MatchType == ImportSuggestionMatchType.Contains
+            ? descriptionKey.Contains(suggestionKey, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(descriptionKey, suggestionKey, StringComparison.OrdinalIgnoreCase);
+    }
 
     private void BuildExistingTransactionIndexes()
     {

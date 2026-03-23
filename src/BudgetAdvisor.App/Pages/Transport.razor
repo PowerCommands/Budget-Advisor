@@ -579,6 +579,7 @@
                             <th>@Localizer["transport.fuelType"]</th>
                             <th>@Localizer["transport.vehicleType"]</th>
                             <th>@Localizer["transport.ownershipType"]</th>
+                            <th>@GetVehicleExpensesHeader()</th>
                             <th>@Localizer["field.actions"]</th>
                         </tr>
                     </thead>
@@ -586,7 +587,7 @@
                         @if (!TransportVehicles.Any())
                         {
                             <tr>
-                                <td colspan="7" class="empty-state">@Localizer["transport.noVehicles"]</td>
+                                <td colspan="8" class="empty-state">@Localizer["transport.noVehicles"]</td>
                             </tr>
                         }
                         else
@@ -594,12 +595,27 @@
                             @foreach (var vehicle in TransportVehicles)
                             {
                                 <tr>
-                                    <td>@vehicle.Name</td>
+                                    <td class="vehicle-edit-cell" @ondblclick="() => BeginEditVehicleName(vehicle)">
+                                        @if (editingVehicleId == vehicle.Id)
+                                        {
+                                            <input @ref="editingVehicleInput"
+                                                   class="form-control form-control-sm vehicle-edit-input"
+                                                   value="@editingVehicleName"
+                                                   @oninput="HandleVehicleNameInput"
+                                                   @onkeydown="HandleVehicleNameKeyDownAsync"
+                                                   @onblur="HandleVehicleNameBlurAsync" />
+                                        }
+                                        else
+                                        {
+                                            <span>@vehicle.Name</span>
+                                        }
+                                    </td>
                                     <td>@vehicle.ModelYear</td>
                                     <td>@vehicle.Mileage</td>
                                     <td>@Localizer[$"transport.fuelType.{vehicle.FuelType}"]</td>
                                     <td>@Localizer[$"transport.vehicleType.{vehicle.VehicleType}"]</td>
                                     <td>@Localizer[$"transport.ownershipType.{vehicle.OwnershipType}"]</td>
+                                    <td>@AppState.FormatCurrency(GetVehicleExpensesForLatestClosedMonth(vehicle.Id))</td>
                                     <td>
                                         <MudIconButton Icon="@Icons.Material.Filled.Delete"
                                                        Color="Color.Error"
@@ -631,6 +647,10 @@
     private EditContext leasingEditContext = default!;
     private EditContext vehicleEditContext = default!;
     private readonly HashSet<Guid> expandedLoanIds = [];
+    private Guid? editingVehicleId;
+    private string editingVehicleName = string.Empty;
+    private ElementReference editingVehicleInput;
+    private bool shouldFocusEditingVehicle;
     private string? statusMessage;
     private bool showAllTransportCosts;
     private bool showAllTransportBindingPeriods;
@@ -693,12 +713,22 @@
             .OrderBy(contract => contract.StartDate)
             .ThenBy(contract => contract.EndDate)
             .ToList();
+    private ClosedMonth? LatestClosedMonth => AppState.GetClosedMonths().LastOrDefault();
 
     protected override void OnInitialized()
     {
         AppState.Changed += HandleChanged;
         Localizer.Changed += HandleChanged;
         ResetForms();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (shouldFocusEditingVehicle)
+        {
+            shouldFocusEditingVehicle = false;
+            await editingVehicleInput.FocusAsync();
+        }
     }
 
     private async Task HandleAddCostAsync()
@@ -1097,6 +1127,62 @@
         }
     }
 
+    private void BeginEditVehicleName(TransportVehicle vehicle)
+    {
+        editingVehicleId = vehicle.Id;
+        editingVehicleName = vehicle.Name;
+        shouldFocusEditingVehicle = true;
+    }
+
+    private void HandleVehicleNameInput(ChangeEventArgs args)
+    {
+        editingVehicleName = args.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task HandleVehicleNameKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key is "Enter" or "NumpadEnter" or "Tab")
+        {
+            await SaveEditedVehicleNameAsync();
+            return;
+        }
+
+        if (args.Key == "Escape")
+        {
+            CancelEditedVehicleName();
+        }
+    }
+
+    private async Task HandleVehicleNameBlurAsync(FocusEventArgs _)
+    {
+        await SaveEditedVehicleNameAsync();
+    }
+
+    private async Task SaveEditedVehicleNameAsync()
+    {
+        if (!editingVehicleId.HasValue)
+        {
+            return;
+        }
+
+        var normalizedName = editingVehicleName.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            CancelEditedVehicleName();
+            return;
+        }
+
+        await AppState.UpdateTransportVehicleNameAsync(editingVehicleId.Value, normalizedName);
+        CancelEditedVehicleName();
+    }
+
+    private void CancelEditedVehicleName()
+    {
+        editingVehicleId = null;
+        editingVehicleName = string.Empty;
+        shouldFocusEditingVehicle = false;
+    }
+
     private void ResetForms()
     {
         var today = DateTime.Today;
@@ -1260,6 +1346,26 @@
 
     private static string FormatInterestRate(decimal rate) => $"{rate:0.##}%";
 
+    private string GetVehicleExpensesHeader() =>
+        LatestClosedMonth is null
+            ? Localizer["table.expenses"]
+            : $"{Localizer["table.expenses"]} {LatestClosedMonth.Year}{LatestClosedMonth.Month:00}";
+
+    private decimal GetVehicleExpensesForLatestClosedMonth(Guid vehicleId)
+    {
+        if (LatestClosedMonth is null)
+        {
+            return 0m;
+        }
+
+        return AppState.Data.ExpenseRecords
+            .Where(entry =>
+                entry.TransportVehicleId == vehicleId &&
+                entry.Year == LatestClosedMonth.Year &&
+                entry.Month == LatestClosedMonth.Month)
+            .Sum(entry => entry.Amount);
+    }
+
     private string GetDefinitionDisplay(TransportCostDefinition definition)
     {
         var vehicleName = GetVehicleName(definition.VehicleId);
@@ -1412,3 +1518,14 @@
     }
 
 }
+
+<style>
+    .vehicle-edit-cell {
+        min-width: 160px;
+        cursor: text;
+    }
+
+    .vehicle-edit-input {
+        min-width: 140px;
+    }
+</style>

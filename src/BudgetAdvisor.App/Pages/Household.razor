@@ -274,7 +274,7 @@
         <div class="stack-grid">
             <section class="card-panel">
                 <h2>@Localizer["household.addMember"]</h2>
-                <EditForm Model="memberForm" OnValidSubmit="HandleAddMemberAsync">
+                <EditForm EditContext="memberEditContext" OnValidSubmit="HandleAddMemberAsync">
                     <DataAnnotationsValidator />
                     <ValidationSummary />
                     <div class="form-grid">
@@ -285,7 +285,7 @@
                         </div>
                         <div>
                             <label class="form-label">@Localizer["field.initials"]</label>
-                            <InputText class="form-control text-uppercase" @bind-Value="memberForm.Initials" @bind-Value:event="oninput" />
+                            <InputText class="form-control text-uppercase" @bind-Value="memberForm.Initials" />
                             <ValidationMessage For="() => memberForm.Initials" />
                         </div>
                     </div>
@@ -358,7 +358,8 @@
 </MudTabs>
 
 @code {
-    private readonly MemberFormModel memberForm = new();
+    private MemberFormModel memberForm = new();
+    private EditContext memberEditContext = default!;
     private OneTimeIncomeFormModel oneTimeIncomeForm = new();
     private SalaryGenerationFormModel salaryGenerationForm = new();
     private EditContext oneTimeIncomeEditContext = default!;
@@ -451,8 +452,8 @@
     {
         memberForm.Initials = NormalizeInitialsInput(memberForm.Initials);
         await AppState.AddMemberAsync(memberForm.Name, memberForm.Initials);
-        memberForm.Name = string.Empty;
-        memberForm.Initials = string.Empty;
+        memberForm = new MemberFormModel();
+        memberEditContext = new EditContext(memberForm);
     }
 
     private async Task HandleAddOneTimeIncomeAsync()
@@ -717,6 +718,7 @@
     {
         var today = DateTime.Today;
 
+        memberEditContext = new EditContext(memberForm);
         oneTimeIncomeForm.Date = today;
         oneTimeIncomeForm.Type = Localizer["incomeType.Salary"];
         salaryGenerationForm.StartDate = today;

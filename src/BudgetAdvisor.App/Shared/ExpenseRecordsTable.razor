@@ -105,10 +105,25 @@
                             @if (OnDelete.HasDelegate)
                             {
                                 <td>
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                                                   Color="Color.Error"
-                                                   Size="Size.Small"
-                                                   OnClick="@(() => OnDelete.InvokeAsync(entry))" />
+                                    <div class="button-row expense-action-row">
+                                        @if (ShowTransportVehicleActions)
+                                        {
+                                            @foreach (var vehicle in TransportVehicles)
+                                            {
+                                                <button class="btn btn-outline-primary btn-sm vehicle-tag-button"
+                                                        title="@vehicle.Name"
+                                                        disabled="@(entry.TransportVehicleId == vehicle.Id)"
+                                                        @onclick="() => HandleAssignTransportVehicleAsync(entry, vehicle.Id)">
+                                                    @GetVehicleButtonLabel(vehicle.Name)
+                                                </button>
+                                            }
+                                        }
+
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                       Color="Color.Error"
+                                                       Size="Size.Small"
+                                                       OnClick="@(() => OnDelete.InvokeAsync(entry))" />
+                                    </div>
                                 </td>
                             }
                         </tr>
@@ -170,9 +185,14 @@
 
     private IReadOnlyList<ExpenseEntry> FilteredEntries => AppState.GetFilteredExpenseEntries(filter);
     private decimal FilteredTotal => FilteredEntries.Sum(entry => entry.Amount);
+    private bool ShowTransportVehicleActions => Scope == ExpenseQueryScope.Transport && TransportVehicles.Count > 0;
 
     private IReadOnlyList<ExpenseFilterCategoryOption> CategoryOptions => AppState.GetExpenseFilterCategoryOptions(filter);
     private IReadOnlyList<string> SubcategoryOptions => AppState.GetExpenseFilterSubcategoryOptions(filter);
+    private IReadOnlyList<TransportVehicle> TransportVehicles =>
+        AppState.Data.TransportVehicles
+            .OrderBy(vehicle => vehicle.Name)
+            .ToList();
 
     protected override void OnParametersSet()
     {
@@ -315,6 +335,24 @@
 
     private static string FormatPeriod(ExpenseEntry entry) => $"{entry.Year:0000}/{entry.Month:00}";
 
+    private async Task HandleAssignTransportVehicleAsync(ExpenseEntry entry, Guid vehicleId)
+    {
+        await AppState.UpdateExpenseTransportVehicleAsync(entry.Id, vehicleId);
+    }
+
+    private static string GetVehicleButtonLabel(string name)
+    {
+        var trimmedName = name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            return "???";
+        }
+
+        return trimmedName.Length <= 6
+            ? trimmedName
+            : trimmedName[..6];
+    }
+
     private int GetColumnCount() => OnDelete.HasDelegate ? 5 : 4;
 
     private sealed class PersistedExpenseDateFilter
@@ -324,3 +362,13 @@
         public DateOnly? EndDate { get; set; }
     }
 }
+
+<style>
+    .expense-action-row {
+        flex-wrap: wrap;
+    }
+
+    .vehicle-tag-button {
+        min-width: 4.5rem;
+    }
+</style>

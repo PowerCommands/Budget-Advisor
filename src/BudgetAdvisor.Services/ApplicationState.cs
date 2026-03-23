@@ -763,6 +763,57 @@ public sealed class ApplicationState
             BuildLogActivity("log.verb.added", "log.entity.vehicle", vehicle.Name));
     }
 
+    public async Task<bool> UpdateTransportVehicleNameAsync(Guid vehicleId, string name)
+    {
+        var vehicle = Data.TransportVehicles.FirstOrDefault(item => item.Id == vehicleId);
+        if (vehicle is null)
+        {
+            return false;
+        }
+
+        var normalizedName = name.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return false;
+        }
+
+        if (string.Equals(vehicle.Name, normalizedName, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        vehicle.Name = normalizedName;
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.vehiclesTab"]),
+            BuildLogActivity("log.verb.updated", "log.entity.vehicle", normalizedName));
+
+        return true;
+    }
+
+    public async Task<bool> UpdateExpenseTransportVehicleAsync(Guid expenseId, Guid vehicleId)
+    {
+        var expense = Data.ExpenseRecords.FirstOrDefault(item => item.Id == expenseId);
+        if (expense is null || expense.Category != ExpenseCategory.Transport)
+        {
+            return false;
+        }
+
+        _ = GetTransportVehicle(vehicleId);
+
+        if (expense.TransportVehicleId == vehicleId)
+        {
+            return true;
+        }
+
+        expense.TransportVehicleId = vehicleId;
+
+        await PersistAndNotifyAndLogAsync(
+            BuildLogDescription(_localizer["nav.transport"], _localizer["transport.costsTab"]),
+            BuildLogActivity("log.verb.updated", "log.entity.expense", GetExpenseActivitySubject(expense.Subcategory, expense.Description)));
+
+        return true;
+    }
+
     public async Task AddSavingsAccountAsync(
         SavingsAccountType accountType,
         string providerName,
@@ -2023,25 +2074,9 @@ public sealed class ApplicationState
 
         var mergedSuggestions = TransactionImportData.ImportedExpenseCategorySuggestions
             .Concat(suggestions)
-            .Where(suggestion =>
-                !string.IsNullOrWhiteSpace(suggestion.Description) &&
-                !string.IsNullOrWhiteSpace(suggestion.Subcategory))
-            .Select(suggestion => new ImportedExpenseCategorySuggestion
-            {
-                Description = suggestion.Description.Trim(),
-                Category = suggestion.Category,
-                Subcategory = suggestion.Subcategory.Trim()
-            })
-            .DistinctBy(suggestion => new
-            {
-                Description = suggestion.Description,
-                suggestion.Category,
-                Subcategory = suggestion.Subcategory
-            })
-            .OrderBy(suggestion => suggestion.Description, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(suggestion => suggestion.Category)
-            .ThenBy(suggestion => suggestion.Subcategory, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        mergedSuggestions = NormalizeImportedExpenseCategorySuggestions(mergedSuggestions);
 
         if (mergedSuggestions.SequenceEqual(TransactionImportData.ImportedExpenseCategorySuggestions, ImportedExpenseCategorySuggestionComparer.Instance))
         {
@@ -2049,6 +2084,35 @@ public sealed class ApplicationState
         }
 
         TransactionImportData.ImportedExpenseCategorySuggestions = mergedSuggestions;
+        await PersistTransactionImportDataAndNotifyAsync();
+    }
+
+    public async Task SetImportedExpenseCategorySuggestionsAsync(IEnumerable<ImportedExpenseCategorySuggestion> suggestions)
+    {
+        ArgumentNullException.ThrowIfNull(suggestions);
+
+        var normalizedSuggestions = NormalizeImportedExpenseCategorySuggestions(suggestions.ToList());
+        if (normalizedSuggestions.SequenceEqual(TransactionImportData.ImportedExpenseCategorySuggestions, ImportedExpenseCategorySuggestionComparer.Instance))
+        {
+            return;
+        }
+
+        TransactionImportData.ImportedExpenseCategorySuggestions = normalizedSuggestions;
+        await PersistTransactionImportDataAndNotifyAsync();
+    }
+
+    public async Task RemoveImportedExpenseCategorySuggestionAsync(Guid suggestionId)
+    {
+        if (suggestionId == Guid.Empty)
+        {
+            return;
+        }
+
+        if (TransactionImportData.ImportedExpenseCategorySuggestions.RemoveAll(suggestion => suggestion.Id == suggestionId) == 0)
+        {
+            return;
+        }
+
         await PersistTransactionImportDataAndNotifyAsync();
     }
 
@@ -4138,23 +4202,39 @@ public sealed class ApplicationState
     private static void NormalizeImportedExpenseCategorySuggestions(TransactionImportData transactionImportData)
     {
         transactionImportData.ImportedExpenseCategorySuggestions ??= [];
-        transactionImportData.ImportedExpenseCategorySuggestions = transactionImportData.ImportedExpenseCategorySuggestions
+        transactionImportData.ImportedExpenseCategorySuggestions = NormalizeImportedExpenseCategorySuggestions(transactionImportData.ImportedExpenseCategorySuggestions);
+    }
+
+    private static List<ImportedExpenseCategorySuggestion> NormalizeImportedExpenseCategorySuggestions(IEnumerable<ImportedExpenseCategorySuggestion> suggestions)
+    {
+        return suggestions
             .Where(suggestion =>
                 !string.IsNullOrWhiteSpace(suggestion.Description) &&
-                !string.IsNullOrWhiteSpace(suggestion.Subcategory))
+                (suggestion.Action == ImportSuggestionAction.HideRow || !string.IsNullOrWhiteSpace(suggestion.Subcategory)))
             .Select(suggestion => new ImportedExpenseCategorySuggestion
             {
+                Id = suggestion.Id == Guid.Empty ? Guid.NewGuid() : suggestion.Id,
                 Description = suggestion.Description.Trim(),
-                Category = suggestion.Category,
-                Subcategory = suggestion.Subcategory.Trim()
+                Category = suggestion.Action == ImportSuggestionAction.HideRow ? ExpenseCategory.Other : suggestion.Category,
+                Subcategory = suggestion.Action == ImportSuggestionAction.HideRow ? string.Empty : suggestion.Subcategory.Trim(),
+                MatchType = suggestion.MatchType is ImportSuggestionMatchType.Exact or ImportSuggestionMatchType.Contains
+                    ? suggestion.MatchType
+                    : ImportSuggestionMatchType.Exact,
+                Action = suggestion.Action is ImportSuggestionAction.ApplySuggestion or ImportSuggestionAction.HideRow
+                    ? suggestion.Action
+                    : ImportSuggestionAction.ApplySuggestion
             })
             .DistinctBy(suggestion => new
             {
                 Description = suggestion.Description,
+                suggestion.MatchType,
+                suggestion.Action,
                 suggestion.Category,
                 Subcategory = suggestion.Subcategory
             })
             .OrderBy(suggestion => suggestion.Description, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(suggestion => suggestion.MatchType)
+            .ThenBy(suggestion => suggestion.Action)
             .ThenBy(suggestion => suggestion.Category)
             .ThenBy(suggestion => suggestion.Subcategory, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -4186,12 +4266,14 @@ public sealed class ApplicationState
             }
 
             return string.Equals(x.Description, y.Description, StringComparison.Ordinal) &&
+                   x.MatchType == y.MatchType &&
+                   x.Action == y.Action &&
                    x.Category == y.Category &&
                    string.Equals(x.Subcategory, y.Subcategory, StringComparison.Ordinal);
         }
 
         public int GetHashCode(ImportedExpenseCategorySuggestion obj) =>
-            HashCode.Combine(obj.Description, obj.Category, obj.Subcategory);
+            HashCode.Combine(obj.Description, obj.MatchType, obj.Action, obj.Category, obj.Subcategory);
     }
 
     private static SubcategoryMainCategory? MapExpenseCategoryToMainCategory(ExpenseCategory category) => category switch

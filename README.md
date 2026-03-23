@@ -59,6 +59,25 @@ A practical way to build up your budget is:
 6. Review Dashboard and Analysis to spot patterns, transfers, Swish activity, and outliers.
 7. Adjust categories and member assignments until the budget feels correct.
 
+## Sample Data: Alice & Bob
+
+Two backup files are available for testing Budget Advisor with the fictional household Alice & Bob. All related files are located in the `sample-data` folder in the repository.
+
+Option 1: Test the import flow
+
+- Restore the backup file `budget-advisor-backup-sample_before_import.zip`.
+- Then import all `*.csv` files from the `sample-data` folder.
+- This will create three months of transaction history for both Alice and Bob.
+
+Option 2: Skip import and go directly to analysis/testing
+
+- Restore the backup file `budget-advisor-backup-not-corrected.zip`.
+- The data in this backup intentionally contains a few things that need to be adjusted.
+- This is by design, so you can try the Analysis features in the application.
+- In particular, you can test removing transfer posts.
+- You can also inspect the Swish posts and assign names to them if desired.
+- There are three mobile numbers in the sample data: one for Alice, one for Bob, and one for their child.
+
 ## Main Tabs
 
 ### Dashboard
