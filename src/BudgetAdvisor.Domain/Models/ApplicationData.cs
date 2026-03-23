@@ -9,7 +9,7 @@ public sealed class ApplicationData
     public string CurrencyCode { get; set; } = "SEK";
     public string DecimalSeparator { get; set; } = ",";
     public string ThousandsSeparator { get; set; } = " ";
-    public string ThemeMode { get; set; } = AppThemeNames.Standard;
+    public string ThemeMode { get; set; } = AppThemeNames.DeepPurple;
     public int UpcomingExpensesMonths { get; set; } = 3;
     public decimal? UpcomingExpensesMinimumAmount { get; set; }
     public bool UseSavingsToBalanceBudgetWidget { get; set; }

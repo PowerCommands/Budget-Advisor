@@ -2987,7 +2987,7 @@ public sealed class ApplicationState
 
         if (string.IsNullOrWhiteSpace(Data.ThemeMode))
         {
-            Data.ThemeMode = AppThemeNames.Standard;
+            Data.ThemeMode = AppThemeNames.DeepPurple;
         }
         else
         {

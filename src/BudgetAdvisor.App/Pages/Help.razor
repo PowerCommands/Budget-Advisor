@@ -57,26 +57,26 @@
 
     <section class="card-panel">
         <MudStack Spacing="2">
-            <MudText Typo="Typo.h5">Sample Data: Alice &amp; Bob</MudText>
+            <MudText Typo="Typo.h5">@Localizer["help.sampleDataTitle"]</MudText>
             <MudText Typo="Typo.body1">
-                Two backup files are available for testing Budget Advisor with the fictional household Alice &amp; Bob. All related files are located in the <code>sample-data</code> folder in the repository.
+                @Localizer["help.sampleDataIntro"]
             </MudText>
 
-            <MudText Typo="Typo.h6">Option 1: Test the import flow</MudText>
+            <MudText Typo="Typo.h6">@Localizer["help.sampleDataOption1Title"]</MudText>
             <ul class="help-list">
-                <li>Restore the backup file <code>budget-advisor-backup-sample_before_import.zip</code>.</li>
-                <li>Then import all <code>*.csv</code> files from the <code>sample-data</code> folder.</li>
-                <li>This will create three months of transaction history for both Alice and Bob.</li>
+                <li>@Localizer["help.sampleDataOption1Body1"]</li>
+                <li>@Localizer["help.sampleDataOption1Body2"]</li>
+                <li>@Localizer["help.sampleDataOption1Body3"]</li>
             </ul>
 
-            <MudText Typo="Typo.h6">Option 2: Skip import and go directly to analysis/testing</MudText>
+            <MudText Typo="Typo.h6">@Localizer["help.sampleDataOption2Title"]</MudText>
             <ul class="help-list">
-                <li>Restore the backup file <code>budget-advisor-backup-not-corrected.zip</code>.</li>
-                <li>The data in this backup intentionally contains a few things that need to be adjusted.</li>
-                <li>This is by design, so you can try the Analysis features in the application.</li>
-                <li>In particular, you can test removing transfer posts.</li>
-                <li>You can also inspect the Swish posts and assign names to them if desired.</li>
-                <li>There are three mobile numbers in the sample data: one for Alice, one for Bob, and one for their child.</li>
+                <li>@Localizer["help.sampleDataOption2Body1"]</li>
+                <li>@Localizer["help.sampleDataOption2Body2"]</li>
+                <li>@Localizer["help.sampleDataOption2Body3"]</li>
+                <li>@Localizer["help.sampleDataOption2Body4"]</li>
+                <li>@Localizer["help.sampleDataOption2Body5"]</li>
+                <li>@Localizer["help.sampleDataOption2Body6"]</li>
             </ul>
         </MudStack>
     </section>
