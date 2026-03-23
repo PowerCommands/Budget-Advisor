@@ -93,7 +93,7 @@ It includes:
 
 This is the best place to check whether the overall model looks reasonable.
 
-### Analys
+### Analysis
 
 Analysis helps you find and clean data.
 
@@ -106,7 +106,7 @@ Current analysis views include:
 - Query
   Lets you build a dynamic search across incomes and expenses using text filters, amount ranges, and date ranges.
 
-### Inkomster
+### Income
 
 This area is used for household members and income registration.
 
@@ -119,7 +119,7 @@ You can:
 
 This is useful if you want to understand who in the household contributes what.
 
-### Boende
+### Housing
 
 Housing contains costs and loans related to your home.
 
@@ -145,7 +145,7 @@ You can:
 - manage leasing
 - manage vehicles
 
-### Utgifter
+### Expenses
 
 Expenses is the general expense area for costs that do not belong specifically to housing or transport.
 
@@ -155,11 +155,11 @@ You can:
 - create recurring expenses
 - review upcoming expenses
 
-### Krediter
+### Credits
 
 Credits is used for credit-related debt and monthly debt tracking. It contributes to the overall view of liabilities and affects relevant calculations in Dashboard.
 
-### Sparande
+### Savings
 
 Savings is used to track savings balances and development over time. These values are used in budget and key metric calculations.
 
@@ -176,7 +176,7 @@ You can:
 
 Importing is often the fastest way to build a good data foundation.
 
-### Inställningar
+### Settings
 
 Settings contains application-level configuration such as language and other utility functions.
 
@@ -244,3 +244,9 @@ docker run --rm -p 8080:8080 budget-advisor:local
 ```
 
 Then open `http://localhost:8080`.
+
+## Publish Docker container with Dockube 
+
+```bash
+build https://github.com/PowerCommands/Budget-Advisor.git "repo-analyzer" --publish --platform=linux/amd64
+```
