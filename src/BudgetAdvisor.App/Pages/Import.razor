@@ -206,6 +206,16 @@
                         }
                     </InputSelect>
                 </div>
+                <div>
+                    <label class="form-label">@Localizer["expenses.import.ruleAction"]</label>
+                    <InputSelect class="form-select" @bind-Value="suggestionActionFilter">
+                        <option value="">@Localizer["filter.allCategories"]</option>
+                        @foreach (var action in ActionOptions)
+                        {
+                            <option value="@action.ToString()">@GetRuleActionLabel(action)</option>
+                        }
+                    </InputSelect>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="table app-table">
@@ -280,6 +290,7 @@
     private EditContext ruleEditContext = default!;
     private string suggestionDescriptionFilter = string.Empty;
     private string suggestionMatchTypeFilter = string.Empty;
+    private string suggestionActionFilter = string.Empty;
     private const int ImportMemberProgressBatchSize = 25;
 
     private IReadOnlyList<TransactionImportBatch> TransactionImportBatches =>
@@ -304,6 +315,9 @@
             .Where(suggestion =>
                 string.IsNullOrWhiteSpace(suggestionMatchTypeFilter) ||
                 string.Equals(suggestion.MatchType.ToString(), suggestionMatchTypeFilter, StringComparison.Ordinal))
+            .Where(suggestion =>
+                string.IsNullOrWhiteSpace(suggestionActionFilter) ||
+                string.Equals(suggestion.Action.ToString(), suggestionActionFilter, StringComparison.Ordinal))
             .ToList();
 
     private double ImportMemberAssignmentProgressValue =>

@@ -340,7 +340,7 @@
                 row.Description.Contains(descriptionFilter.Trim(), StringComparison.OrdinalIgnoreCase))
             .Where(row => showAllRows || !row.IsAlreadyImported)
             .Where(row => !hiddenDescriptions.Contains(GetDescriptionKey(row.Description)))
-            .Where(row => showSavedHiddenRows || !MatchesSavedHideSuggestion(row.Description))
+            .Where(row => showAllRows || showSavedHiddenRows || !MatchesSavedHideSuggestion(row.Description))
             .ToList();
 
     protected override void OnInitialized()
