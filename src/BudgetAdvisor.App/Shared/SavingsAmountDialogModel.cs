@@ -4,6 +4,9 @@ namespace BudgetAdvisor.App.Shared;
 
 public sealed class SavingsAmountDialogModel
 {
+    [Required(ErrorMessage = "Account is required.")]
+    public Guid? SavingsAccountId { get; set; }
+
     [Required(ErrorMessage = "Date is required.")]
     public DateTime? Date { get; set; }
 

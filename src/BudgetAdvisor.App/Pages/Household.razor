@@ -405,7 +405,7 @@
 
     private IReadOnlyList<string> IncomeSubcategoryOptions =>
         FilterIncomeEntries(skipSubcategoryFilter: true)
-            .Select(GetIncomeTypeDisplay)
+            .Select(GetIncomeSubcategoryLabel)
             .Where(type => !string.IsNullOrWhiteSpace(type))
             .Distinct(StringComparer.CurrentCultureIgnoreCase)
             .OrderBy(type => type, StringComparer.CurrentCultureIgnoreCase)
@@ -783,6 +783,9 @@
         return string.IsNullOrWhiteSpace(income.Metadata) ? typeLabel : $"{income.Metadata} - {typeLabel}";
     }
 
+    private string GetIncomeSubcategoryLabel(IncomeEntry income) =>
+        AppState.GetIncomeTypeDisplay(income.Type);
+
     private string FormatYearMonth(int year, int month) => $"{year}-{month:00}";
 
     private IReadOnlyList<string> GetIncomeTypeSuggestions() =>
@@ -811,7 +814,7 @@
 
         if (!skipSubcategoryFilter && !string.IsNullOrWhiteSpace(incomeSubcategoryFilter))
         {
-            query = query.Where(entry => string.Equals(GetIncomeTypeDisplay(entry), incomeSubcategoryFilter, StringComparison.CurrentCultureIgnoreCase));
+            query = query.Where(entry => string.Equals(GetIncomeSubcategoryLabel(entry), incomeSubcategoryFilter, StringComparison.CurrentCultureIgnoreCase));
         }
 
         if (!skipYearFilter && int.TryParse(incomeYearFilter, out var year))

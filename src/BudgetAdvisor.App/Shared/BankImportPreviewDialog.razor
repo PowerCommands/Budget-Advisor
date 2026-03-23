@@ -3,6 +3,7 @@
 @using BudgetAdvisor.App.Imports
 @using BudgetAdvisor.Domain.Enums
 @using BudgetAdvisor.Domain.Models
+@inject IDialogService DialogService
 @inject LocalizationService Localizer
 @inject ApplicationState AppState
 @inject TransactionImportService ImportService
@@ -126,25 +127,33 @@
                                 <td>
                                     <InputCheckbox @bind-Value="row.Include"
                                                    @bind-Value:after="() => HandleRowIncludeChanged(row)"
-                                                   disabled="@IsBusy" />
+                                                   disabled="@(IsBusy || row.IsHandledAsSavingsDeposit)" />
                                 </td>
-                                <td>@row.Description</td>
+                                <td>
+                                    <div class="d-flex flex-column gap-2">
+                                        <span>@row.Description</span>
+                                        @if (row.IsHandledAsSavingsDeposit)
+                                        {
+                                            <span class="chip bank-import-status-chip">@Localizer["expenseCategory.Savings"]</span>
+                                        }
+                                    </div>
+                                </td>
                                 <td>
                                     <MudIconButton Icon="@Icons.Material.Filled.VisibilityOff"
                                                    title="@Localizer["expenses.import.hideMatchingRows"]"
                                                    aria-label="@Localizer["expenses.import.hideMatchingRows"]"
                                                    Size="Size.Small"
                                                    OnClick="@(() => HideMatchingRows(row))"
-                                                   Disabled="@IsBusy" />
+                                                   Disabled="@(IsBusy || row.IsHandledAsSavingsDeposit)" />
                                 </td>
                                 <td>@row.TransactionDate.ToString("yyyy-MM-dd")</td>
                                 <td>@AppState.FormatCurrency(row.Amount)</td>
                                 <td>
                                     <InputSelect class="form-select"
-                                                 @bind-Value="row.MainCategory"
+                                                 @bind-Value="row.MainCategoryValue"
                                                  @bind-Value:after="() => HandleMainCategoryChanged(row)"
-                                                 disabled="@IsBusy">
-                                        @foreach (var category in MainCategories)
+                                                 disabled="@(IsBusy || row.IsHandledAsSavingsDeposit)">
+                                        @foreach (var category in GetMainCategoryOptions(row))
                                         {
                                             <option value="@category">@GetMainCategoryLabel(category)</option>
                                         }
@@ -155,7 +164,7 @@
                                                @bind-Value="row.Subcategory"
                                                @bind-Value:after="() => HandleSubcategoryChanged(row)"
                                                list="@GetSubcategoryListId(row)"
-                                               disabled="@IsBusy" />
+                                               disabled="@(IsBusy || row.IsHandledAsSavingsDeposit || row.IsSavingsCategory)" />
                                     <datalist id="@GetSubcategoryListId(row)">
                                         @foreach (var suggestion in GetSubcategorySuggestions(row))
                                         {
@@ -170,24 +179,24 @@
                                             <button type="button"
                                                     class="btn btn-outline-secondary btn-sm bank-import-apply-button"
                                                     @onclick="() => ApplySuggestion(row, suggestion)"
-                                                    disabled="@IsBusy">
+                                                    disabled="@(IsBusy || row.IsHandledAsSavingsDeposit)">
                                                 @GetSuggestionLabel(suggestion)
                                             </button>
                                         }
                                     </div>
                                 </td>
                                 <td>
-                                    <InputCheckbox @bind-Value="row.IsRecurring" disabled="@IsBusy" />
+                                    <InputCheckbox @bind-Value="row.IsRecurring" disabled="@(IsBusy || row.IsHandledAsSavingsDeposit || row.IsSavingsCategory)" />
                                 </td>
                                 <td>
                                     <InputDate class="form-control"
                                                @bind-Value="row.StartDate"
-                                               disabled="@(!row.IsRecurring || IsBusy)" />
+                                               disabled="@(!row.IsRecurring || IsBusy || row.IsHandledAsSavingsDeposit || row.IsSavingsCategory)" />
                                 </td>
                                 <td>
                                     <InputDate class="form-control"
                                                @bind-Value="row.EndDate"
-                                               disabled="@(!row.IsRecurring || IsBusy)" />
+                                               disabled="@(!row.IsRecurring || IsBusy || row.IsHandledAsSavingsDeposit || row.IsSavingsCategory)" />
                                 </td>
                             </tr>
                         }
@@ -297,7 +306,12 @@
         SubcategoryMainCategory.Clothing,
         SubcategoryMainCategory.Other
     ];
+    private static IReadOnlyList<string> StandardMainCategoryValues { get; } =
+        MainCategories.Select(category => category.ToString()).ToList();
+    private static IReadOnlyList<string> MainCategoryValuesWithSavings { get; } =
+        StandardMainCategoryValues.Concat([SavingsMainCategoryValue]).ToList();
     private const int RenderBatchSize = 25;
+    private const string SavingsMainCategoryValue = "__Savings__";
 
     private readonly List<ImportPreviewRowModel> rows = [];
     private readonly List<string> importStatuses = [];
@@ -515,6 +529,11 @@
     {
         foreach (var row in FilteredRows)
         {
+            if (row.IsHandledAsSavingsDeposit)
+            {
+                continue;
+            }
+
             row.Include = selectAllRows;
         }
 
@@ -564,7 +583,7 @@
 
     private void ApplySuggestion(ImportPreviewRowModel row, ApplyCategorySuggestion suggestion)
     {
-        row.MainCategory = suggestion.MainCategory;
+        row.MainCategoryValue = suggestion.MainCategory.ToString();
         row.Subcategory = suggestion.Subcategory;
         if (!row.IsExpense)
         {
@@ -577,8 +596,65 @@
         RefreshSelectAllRows();
     }
 
-    private Task HandleMainCategoryChanged(ImportPreviewRowModel row)
+    private async Task HandleMainCategoryChanged(ImportPreviewRowModel row)
     {
+        if (row.IsSavingsCategory)
+        {
+            if (row.Amount >= 0m)
+            {
+                row.MainCategoryValue = SubcategoryMainCategory.Other.ToString();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var parameters = new DialogParameters<RegisterSavingsDepositDialog>
+            {
+                { dialog => dialog.PresetAmount, Math.Abs(row.Amount) },
+                { dialog => dialog.PresetDate, row.TransactionDate.ToDateTime(TimeOnly.MinValue) }
+            };
+
+            var dialog = await DialogService.ShowAsync<RegisterSavingsDepositDialog>(Localizer["savings.deposit"], parameters);
+            if (dialog is null)
+            {
+                row.MainCategoryValue = SubcategoryMainCategory.Other.ToString();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var result = await dialog.Result;
+            if (result?.Canceled ?? true)
+            {
+                row.MainCategoryValue = SubcategoryMainCategory.Other.ToString();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            if (result.Data is not SavingsAmountDialogModel savingsModel ||
+                !savingsModel.Date.HasValue ||
+                !savingsModel.SavingsAccountId.HasValue)
+            {
+                row.MainCategoryValue = SubcategoryMainCategory.Other.ToString();
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            await AppState.AddSavingsDepositAsync(
+                savingsModel.SavingsAccountId.Value,
+                DateOnly.FromDateTime(savingsModel.Date.Value),
+                savingsModel.Amount,
+                savingsModel.IsAdjustment);
+
+            row.IsHandledAsSavingsDeposit = true;
+            row.Include = false;
+            row.IsRecurring = false;
+            row.StartDate = null;
+            row.EndDate = null;
+            row.Subcategory = string.Empty;
+            RefreshSelectAllRows();
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
         if (!row.IsExpense)
         {
             row.IsRecurring = false;
@@ -586,7 +662,7 @@
             row.EndDate = null;
         }
 
-        return InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
     private Task HandleSubcategoryChanged(ImportPreviewRowModel row)
@@ -602,13 +678,14 @@
 
     private IReadOnlyList<ApplyCategorySuggestion> GetApplySuggestions(ImportPreviewRowModel row)
     {
-        if (row.Include)
+        if (row.Include || row.IsHandledAsSavingsDeposit || row.IsSavingsCategory)
         {
             return [];
         }
 
         return rows
             .Where(candidate => candidate.Id != row.Id)
+            .Where(candidate => !candidate.IsHandledAsSavingsDeposit)
             .Where(candidate => candidate.Include)
             .Where(candidate => !string.IsNullOrWhiteSpace(candidate.Subcategory))
             .Where(candidate => string.Equals(GetDescriptionKey(candidate.Description), GetDescriptionKey(row.Description), StringComparison.OrdinalIgnoreCase))
@@ -630,9 +707,17 @@
 
     private void RefreshSelectAllRows()
     {
-        var filteredRows = FilteredRows;
-        selectAllRows = filteredRows.Count > 0 && filteredRows.All(row => row.Include);
+        var selectableRows = FilteredRows
+            .Where(row => !row.IsHandledAsSavingsDeposit)
+            .ToList();
+
+        selectAllRows = selectableRows.Count > 0 && selectableRows.All(row => row.Include);
     }
+
+    private IReadOnlyList<string> GetMainCategoryOptions(ImportPreviewRowModel row) =>
+        row.Amount < 0m
+            ? MainCategoryValuesWithSavings
+            : StandardMainCategoryValues;
 
     private static string GetSubcategoryListId(ImportPreviewRowModel row) => $"bank-import-subcategory-{row.Id}";
 
@@ -705,7 +790,7 @@
             StartDate = transaction.Amount < 0m ? transaction.TransactionDate.ToDateTime(TimeOnly.MinValue) : null,
             Amount = transaction.Amount,
             ImportOccurrence = importOccurrence,
-            MainCategory = match?.MainCategory ?? (transaction.Amount > 0m ? SubcategoryMainCategory.Income : SubcategoryMainCategory.Other),
+            MainCategoryValue = (match?.MainCategory ?? (transaction.Amount > 0m ? SubcategoryMainCategory.Income : SubcategoryMainCategory.Other)).ToString(),
             Subcategory = match?.Subcategory ?? string.Empty,
             IsAlreadyImported = match is not null
         };
@@ -766,9 +851,16 @@
         (processedCount % RenderBatchSize == 0 || processedCount == totalCount);
 
     private IReadOnlyList<string> GetSubcategorySuggestions(ImportPreviewRowModel row) =>
-        row.MainCategory == SubcategoryMainCategory.Income
+        row.IsSavingsCategory
+            ? []
+            : row.MainCategory == SubcategoryMainCategory.Income
             ? AppState.GetIncomeTypeSuggestions()
             : AppState.GetExpenseSubcategorySuggestions(MapMainCategoryToExpenseCategory(row.MainCategory));
+
+    private string GetMainCategoryLabel(string mainCategoryValue) =>
+        string.Equals(mainCategoryValue, SavingsMainCategoryValue, StringComparison.Ordinal)
+            ? Localizer["expenseCategory.Savings"]
+            : GetMainCategoryLabel(Enum.TryParse<SubcategoryMainCategory>(mainCategoryValue, out var parsed) ? parsed : SubcategoryMainCategory.Other);
 
     private string GetMainCategoryLabel(SubcategoryMainCategory mainCategory) => mainCategory switch
     {
@@ -818,11 +910,20 @@
 
         public bool IsLeaving { get; set; }
 
-        public SubcategoryMainCategory MainCategory { get; set; }
+        public string MainCategoryValue { get; set; } = SubcategoryMainCategory.Other.ToString();
 
         public string Subcategory { get; set; } = string.Empty;
 
-        public bool IsExpense => MainCategory != SubcategoryMainCategory.Income;
+        public bool IsHandledAsSavingsDeposit { get; set; }
+
+        public bool IsSavingsCategory => string.Equals(MainCategoryValue, SavingsMainCategoryValue, StringComparison.Ordinal);
+
+        public SubcategoryMainCategory MainCategory =>
+            Enum.TryParse<SubcategoryMainCategory>(MainCategoryValue, out var parsed)
+                ? parsed
+                : SubcategoryMainCategory.Other;
+
+        public bool IsExpense => !IsSavingsCategory && MainCategory != SubcategoryMainCategory.Income;
     }
 
     private sealed record ApplyCategorySuggestion(SubcategoryMainCategory MainCategory, string Subcategory);

@@ -558,7 +558,12 @@
 
     private async Task HandleDepositAsync(SavingsAccount account)
     {
-        var dialog = await DialogService.ShowAsync<RegisterSavingsDepositDialog>(Localizer["savings.deposit"]);
+        var parameters = new DialogParameters<RegisterSavingsDepositDialog>
+        {
+            { dialog => dialog.SavingsAccountId, account.Id }
+        };
+
+        var dialog = await DialogService.ShowAsync<RegisterSavingsDepositDialog>(Localizer["savings.deposit"], parameters);
         if (dialog is null)
         {
             return;
@@ -575,7 +580,7 @@
             return;
         }
 
-        await AppState.AddSavingsDepositAsync(account.Id, DateOnly.FromDateTime(model.Date.Value), model.Amount, model.IsAdjustment);
+        await AppState.AddSavingsDepositAsync(model.SavingsAccountId ?? account.Id, DateOnly.FromDateTime(model.Date.Value), model.Amount, model.IsAdjustment);
         statusMessage = Localizer[model.IsAdjustment ? "savings.balanceAdjusted" : "savings.depositRegistered"];
     }
 
