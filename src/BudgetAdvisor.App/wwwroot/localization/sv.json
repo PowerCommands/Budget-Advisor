@@ -49,7 +49,7 @@
     "sync.downloadConfirmMessage": "Detta ersätter aktuell lokal applikationsdata, lokaliseringsdata och aktivitetslogg med versionerna som finns i Dropbox.",
     "start.latestMonth": "Budget",
     "start.keyMetrics": "Nyckeltal",
-    "start.currentMonthCredits": "Krediter månad",
+    "start.currentMonthCredits": "Skulder",
     "start.currentMonthInterest": "Ränta månad",
     "start.currentMonthAmortization": "Amortering månad",
     "start.budgetWidgetSettingsTitle": "Inställningar för Budget",
