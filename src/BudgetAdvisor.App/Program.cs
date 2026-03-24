@@ -22,6 +22,7 @@ builder.Services.AddScoped<ManualSyncService>();
 builder.Services.AddScoped<ApplicationState>();
 builder.Services.AddScoped<ITransactionImporter, SwedbankCsvTransactionImporter>();
 builder.Services.AddScoped<ITransactionImporter, NordeaCsvTransactionImporter>();
+builder.Services.AddScoped<ITransactionImporter, NordeaXlsxTransactionImporter>();
 builder.Services.AddScoped<ITransactionImporter, SebCsvTransactionImporter>();
 builder.Services.AddScoped<ITransactionImportDetector, TransactionImportDetector>();
 builder.Services.AddScoped<TransactionImportService>();

@@ -295,7 +295,7 @@
     public string ProviderLogoPath { get; set; } = string.Empty;
 
     [Parameter]
-    public string FileContent { get; set; } = string.Empty;
+    public TransactionImportFile ImportFile { get; set; } = new();
 
     private static IReadOnlyList<SubcategoryMainCategory> MainCategories { get; } =
     [
@@ -485,7 +485,7 @@
 
         try
         {
-            var detectedImport = ImportService.Parse(FileContent);
+            var detectedImport = ImportService.Parse(ImportFile);
             ProviderDisplayName = detectedImport.DisplayName;
             ProviderLogoPath = detectedImport.LogoPath;
             transactions = detectedImport.Candidates.ToList();

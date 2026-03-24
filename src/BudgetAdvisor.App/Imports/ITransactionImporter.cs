@@ -10,7 +10,7 @@ public interface ITransactionImporter
 
     string LogoPath { get; }
 
-    bool CanImport(string fileContent);
+    bool CanImport(TransactionImportFile file);
 
-    IReadOnlyList<ImportedTransactionCandidate> Parse(string fileContent);
+    IReadOnlyList<ImportedTransactionCandidate> Parse(TransactionImportFile file);
 }

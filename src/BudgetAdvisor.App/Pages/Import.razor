@@ -1,6 +1,5 @@
 @page "/import"
 @using System.ComponentModel.DataAnnotations
-@using System.Text
 @using BudgetAdvisor.App.Imports
 @using BudgetAdvisor.Domain.Enums
 @using Microsoft.AspNetCore.Components.Forms
@@ -24,7 +23,7 @@
                            Color="Color.Primary"
                            StartIcon="@Icons.Material.Filled.UploadFile">
                     @Localizer["expenses.import.uploadFile"]
-                    <InputFile OnChange="HandleSwedbankFileSelectedAsync" accept=".csv,text/csv" hidden />
+                    <InputFile OnChange="HandleImportFileSelectedAsync" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
                 </MudButton>
 
                 <div class="d-flex flex-column gap-2 align-self-stretch w-100">
@@ -332,17 +331,17 @@
         Localizer.Changed += HandleChanged;
     }
 
-    private async Task HandleSwedbankFileSelectedAsync(InputFileChangeEventArgs args)
+    private async Task HandleImportFileSelectedAsync(InputFileChangeEventArgs args)
     {
         statusMessage = null;
 
         try
         {
-            var fileContent = await ReadFileAsync(args.File);
+            var file = await ReadFileAsync(args.File);
 
             var parameters = new DialogParameters<BankImportPreviewDialog>
             {
-                { dialog => dialog.FileContent, fileContent }
+                { dialog => dialog.ImportFile, file }
             };
 
             var options = new DialogOptions
@@ -602,31 +601,18 @@
         Localizer.Changed -= HandleChanged;
     }
 
-    private static async Task<string> ReadFileAsync(IBrowserFile file)
+    private static async Task<TransactionImportFile> ReadFileAsync(IBrowserFile file)
     {
         await using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
         await using var memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
 
-        var bytes = memoryStream.ToArray();
-        return DecodeFileContent(bytes);
-    }
-
-    private static string DecodeFileContent(byte[] bytes)
-    {
-        if (bytes.Length == 0)
+        return new TransactionImportFile
         {
-            return string.Empty;
-        }
-
-        var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
-        var utf8Content = utf8.GetString(bytes);
-        if (!utf8Content.Contains('\uFFFD'))
-        {
-            return utf8Content;
-        }
-
-        return Encoding.Latin1.GetString(bytes);
+            FileName = file.Name,
+            ContentType = file.ContentType,
+            Content = memoryStream.ToArray()
+        };
     }
 
     private sealed class ImportSuggestionFormModel : IValidatableObject

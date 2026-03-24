@@ -9,10 +9,10 @@ public sealed class TransactionImportService
         _detector = detector;
     }
 
-    public DetectedTransactionImport Parse(string fileContent)
+    public DetectedTransactionImport Parse(TransactionImportFile file)
     {
-        var importer = _detector.Detect(fileContent);
-        var candidates = importer.Parse(fileContent);
+        var importer = _detector.Detect(file);
+        var candidates = importer.Parse(file);
 
         return new DetectedTransactionImport
         {

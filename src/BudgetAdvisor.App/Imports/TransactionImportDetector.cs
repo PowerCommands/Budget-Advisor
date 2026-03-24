@@ -9,14 +9,14 @@ public sealed class TransactionImportDetector : ITransactionImportDetector
         _importers = importers.ToList();
     }
 
-    public ITransactionImporter Detect(string fileContent)
+    public ITransactionImporter Detect(TransactionImportFile file)
     {
-        if (string.IsNullOrWhiteSpace(fileContent))
+        if (file.Content.Length == 0)
         {
             throw new TransactionImportException("The selected file is empty.");
         }
 
-        var importer = _importers.FirstOrDefault(candidate => candidate.CanImport(fileContent));
+        var importer = _importers.FirstOrDefault(candidate => candidate.CanImport(file));
         if (importer is null)
         {
             throw new TransactionImportException("The selected file format is not recognized.");

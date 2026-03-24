@@ -18,8 +18,14 @@ public sealed class SebCsvTransactionImporter : ITransactionImporter
 
     public string LogoPath => "images/import-seb.svg";
 
-    public bool CanImport(string fileContent)
+    public bool CanImport(TransactionImportFile file)
     {
+        if (!file.HasExtension(".csv"))
+        {
+            return false;
+        }
+
+        var fileContent = file.GetTextContent();
         if (string.IsNullOrWhiteSpace(fileContent))
         {
             return false;
@@ -39,8 +45,9 @@ public sealed class SebCsvTransactionImporter : ITransactionImporter
                && headerColumns.Contains(BalanceColumn, StringComparer.OrdinalIgnoreCase);
     }
 
-    public IReadOnlyList<ImportedTransactionCandidate> Parse(string fileContent)
+    public IReadOnlyList<ImportedTransactionCandidate> Parse(TransactionImportFile file)
     {
+        var fileContent = file.GetTextContent();
         if (string.IsNullOrWhiteSpace(fileContent))
         {
             throw new TransactionImportException("The selected file is empty.");
