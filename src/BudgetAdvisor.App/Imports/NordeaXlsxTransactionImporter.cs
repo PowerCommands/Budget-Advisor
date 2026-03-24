@@ -4,11 +4,11 @@ namespace BudgetAdvisor.App.Imports;
 
 public sealed class NordeaXlsxTransactionImporter : ITransactionImporter
 {
-    public string ImporterKey => "nordea.xlsx";
+    public string ImporterKey => "skandiabanken.xlsx";
 
-    public string DisplayName => "Nordea";
+    public string DisplayName => "Skandiabanken";
 
-    public string LogoPath => "images/import-nordea.svg";
+    public string LogoPath => "images/skandiabanken.png";
 
     public bool CanImport(TransactionImportFile file)
     {
@@ -41,7 +41,7 @@ public sealed class NordeaXlsxTransactionImporter : ITransactionImporter
 
         if (!file.HasExtension(".xlsx"))
         {
-            throw new TransactionImportException("The selected file is not a supported Nordea Excel file.");
+            throw new TransactionImportException("The selected file is not a supported Skandiabanken Excel file.");
         }
 
         IReadOnlyList<IReadOnlyList<SpreadsheetCellValue>> rows;
@@ -55,7 +55,7 @@ public sealed class NordeaXlsxTransactionImporter : ITransactionImporter
         }
 
         var headerRow = FindHeaderRow(rows)
-            ?? throw new TransactionImportException("The Nordea Excel file is missing the transaction header row.");
+            ?? throw new TransactionImportException("The Skandiabanken Excel file is missing the transaction header row.");
 
         var transactionDateIndex = GetRequiredColumnIndex(headerRow, IsTransactionDateHeader, "Bokf. datum");
         var descriptionIndex = GetRequiredColumnIndex(headerRow, IsDescriptionHeader, "Beskrivning");
@@ -87,7 +87,7 @@ public sealed class NordeaXlsxTransactionImporter : ITransactionImporter
 
             if (dateCell is null || amountCell is null || balanceCell is null)
             {
-                throw new TransactionImportException($"The Nordea Excel file contains incomplete data on row {rowIndex + 1}.");
+                throw new TransactionImportException($"The Skandiabanken Excel file contains incomplete data on row {rowIndex + 1}.");
             }
 
             try
@@ -109,13 +109,13 @@ public sealed class NordeaXlsxTransactionImporter : ITransactionImporter
                     Amount = amount,
                     Balance = balance,
                     Currency = "SEK",
-                    SourceBank = "Nordea",
-                    SourceFormat = "Nordea Excel"
+                    SourceBank = "Skandiabanken",
+                    SourceFormat = "Skandiabanken Excel"
                 });
             }
             catch (FormatException)
             {
-                throw new TransactionImportException($"The Nordea Excel file contains invalid data on row {rowIndex + 1}.");
+                throw new TransactionImportException($"The Skandiabanken Excel file contains invalid data on row {rowIndex + 1}.");
             }
         }
 
@@ -140,7 +140,7 @@ public sealed class NordeaXlsxTransactionImporter : ITransactionImporter
         var cell = headerRow.FirstOrDefault(candidate => predicate(candidate.Text));
         if (cell is null)
         {
-            throw new TransactionImportException($"The Nordea Excel file is missing the required column \"{columnName}\".");
+            throw new TransactionImportException($"The Skandiabanken Excel file is missing the required column \"{columnName}\".");
         }
 
         return cell.ColumnIndex;

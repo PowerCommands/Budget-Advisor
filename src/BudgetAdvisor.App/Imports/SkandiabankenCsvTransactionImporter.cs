@@ -4,15 +4,18 @@ using System.Text;
 
 namespace BudgetAdvisor.App.Imports;
 
-public sealed class NordeaCsvTransactionImporter : ITransactionImporter
+public sealed class SkandiabankenCsvTransactionImporter : ITransactionImporter
 {
-    private const string TransactionDateColumn = "Datum";
-    private const string BookingDateColumn = "Bokföringsdatum";
-    private const string DescriptionColumn = "Text";
+    private const string BookingDateColumn = "Bokforingsdag";
     private const string AmountColumn = "Belopp";
+    private const string SenderColumn = "Avsandare";
+    private const string RecipientColumn = "Mottagare";
+    private const string NameColumn = "Namn";
+    private const string SubjectColumn = "Rubrik";
     private const string BalanceColumn = "Saldo";
+    private const string CurrencyColumn = "Valuta";
 
-    public string ImporterKey => "nordea-legacy.csv";
+    public string ImporterKey => "nordea.csv";
 
     public string DisplayName => "Nordea";
 
@@ -38,12 +41,18 @@ public sealed class NordeaCsvTransactionImporter : ITransactionImporter
             return false;
         }
 
-        var headerColumns = ParseDelimitedLine(headerLine, ';');
-        return headerColumns.Contains(TransactionDateColumn, StringComparer.OrdinalIgnoreCase)
-               && headerColumns.Contains(BookingDateColumn, StringComparer.OrdinalIgnoreCase)
-               && headerColumns.Contains(DescriptionColumn, StringComparer.OrdinalIgnoreCase)
+        var headerColumns = ParseDelimitedLine(headerLine, ';')
+            .Select(NormalizeHeader)
+            .ToList();
+
+        return headerColumns.Contains(BookingDateColumn, StringComparer.OrdinalIgnoreCase)
                && headerColumns.Contains(AmountColumn, StringComparer.OrdinalIgnoreCase)
-               && headerColumns.Contains(BalanceColumn, StringComparer.OrdinalIgnoreCase);
+               && headerColumns.Contains(SenderColumn, StringComparer.OrdinalIgnoreCase)
+               && headerColumns.Contains(RecipientColumn, StringComparer.OrdinalIgnoreCase)
+               && headerColumns.Contains(NameColumn, StringComparer.OrdinalIgnoreCase)
+               && headerColumns.Contains(SubjectColumn, StringComparer.OrdinalIgnoreCase)
+               && headerColumns.Contains(BalanceColumn, StringComparer.OrdinalIgnoreCase)
+               && headerColumns.Contains(CurrencyColumn, StringComparer.OrdinalIgnoreCase);
     }
 
     public IReadOnlyList<ImportedTransactionCandidate> Parse(TransactionImportFile file)
@@ -61,11 +70,17 @@ public sealed class NordeaCsvTransactionImporter : ITransactionImporter
             throw new TransactionImportException("The selected file is empty.");
         }
 
-        var headerColumns = ParseDelimitedLine(headerLine, ';');
-        var transactionDateIndex = GetRequiredColumnIndex(headerColumns, TransactionDateColumn);
-        var descriptionIndex = GetRequiredColumnIndex(headerColumns, DescriptionColumn);
-        var amountIndex = GetRequiredColumnIndex(headerColumns, AmountColumn);
-        var balanceIndex = GetRequiredColumnIndex(headerColumns, BalanceColumn);
+        var rawHeaderColumns = ParseDelimitedLine(headerLine, ';');
+        var normalizedHeaderColumns = rawHeaderColumns.Select(NormalizeHeader).ToList();
+
+        var bookingDateIndex = GetRequiredColumnIndex(normalizedHeaderColumns, BookingDateColumn);
+        var amountIndex = GetRequiredColumnIndex(normalizedHeaderColumns, AmountColumn);
+        var senderIndex = GetRequiredColumnIndex(normalizedHeaderColumns, SenderColumn);
+        var recipientIndex = GetRequiredColumnIndex(normalizedHeaderColumns, RecipientColumn);
+        var nameIndex = GetRequiredColumnIndex(normalizedHeaderColumns, NameColumn);
+        var subjectIndex = GetRequiredColumnIndex(normalizedHeaderColumns, SubjectColumn);
+        var balanceIndex = GetRequiredColumnIndex(normalizedHeaderColumns, BalanceColumn);
+        var currencyIndex = GetRequiredColumnIndex(normalizedHeaderColumns, CurrencyColumn);
 
         var candidates = new List<ImportedTransactionCandidate>();
         var lineNumber = 1;
@@ -81,30 +96,35 @@ public sealed class NordeaCsvTransactionImporter : ITransactionImporter
             }
 
             var columns = ParseDelimitedLine(line, ';');
-            if (columns.Count < headerColumns.Count)
+            if (columns.Count < rawHeaderColumns.Count)
             {
                 throw new TransactionImportException($"The Nordea CSV file could not be parsed on line {lineNumber}.");
             }
 
             try
             {
-                var amount = ParseNordeaDecimal(columns[amountIndex]);
+                var amount = ParseSkandiabankenDecimal(columns[amountIndex]);
                 if (amount == 0m)
                 {
                     continue;
                 }
 
-                var transactionDate = DateOnly.ParseExact(columns[transactionDateIndex], "yyyy-MM-dd", CultureInfo.InvariantCulture);
-                var description = columns[descriptionIndex].Trim();
-                var balance = ParseNordeaDecimal(columns[balanceIndex]);
+                var transactionDate = DateOnly.ParseExact(columns[bookingDateIndex], "yyyy/MM/dd", CultureInfo.InvariantCulture);
+                var description = BuildDescription(
+                    columns[senderIndex],
+                    columns[recipientIndex],
+                    columns[nameIndex],
+                    columns[subjectIndex]);
+                var balance = ParseSkandiabankenDecimal(columns[balanceIndex]);
+                var currency = NormalizeValue(columns[currencyIndex]);
 
                 candidates.Add(new ImportedTransactionCandidate
                 {
                     TransactionDate = transactionDate,
-                    Description = string.IsNullOrWhiteSpace(description) ? "Transaction" : description,
+                    Description = description,
                     Amount = amount,
                     Balance = balance,
-                    Currency = "SEK",
+                    Currency = string.IsNullOrWhiteSpace(currency) ? "SEK" : currency,
                     SourceBank = "Nordea",
                     SourceFormat = "Nordea CSV"
                 });
@@ -190,7 +210,16 @@ public sealed class NordeaCsvTransactionImporter : ITransactionImporter
 
     private static string NormalizeValue(string value) => value.Trim().Trim('\uFEFF');
 
-    private static decimal ParseNordeaDecimal(string value)
+    private static string NormalizeHeader(string value)
+    {
+        var normalized = NormalizeValue(value);
+        normalized = normalized.Replace('ö', 'o').Replace('Ö', 'O');
+        normalized = normalized.Replace('ä', 'a').Replace('Ä', 'A');
+        normalized = normalized.Replace('å', 'a').Replace('Å', 'A');
+        return normalized;
+    }
+
+    private static decimal ParseSkandiabankenDecimal(string value)
     {
         var normalized = NormalizeValue(value)
             .Replace(" ", string.Empty, StringComparison.Ordinal)
@@ -199,5 +228,19 @@ public sealed class NordeaCsvTransactionImporter : ITransactionImporter
             .Replace(',', '.');
 
         return decimal.Parse(normalized, NumberStyles.Number | NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
+    }
+
+    private static string BuildDescription(string sender, string recipient, string name, string subject)
+    {
+        var parts = new[]
+        {
+            NormalizeValue(name),
+            NormalizeValue(subject),
+            NormalizeValue(recipient),
+            NormalizeValue(sender)
+        };
+
+        var description = string.Join(" - ", parts.Where(static part => !string.IsNullOrWhiteSpace(part)).Distinct(StringComparer.OrdinalIgnoreCase));
+        return string.IsNullOrWhiteSpace(description) ? "Transaction" : description;
     }
 }
