@@ -84,6 +84,13 @@
                     {
                         <th>@Localizer["field.actions"]</th>
                     }
+                    <th class="filter-col">
+                        <input type="checkbox"
+                               class="form-check-input"
+                               title="@Localizer["table.includeAllInSum"]"
+                               checked="@AllEntriesIncluded"
+                               @onchange="HandleToggleAllInclusion" />
+                    </th>
                 </tr>
             </thead>
             <tbody>
@@ -97,7 +104,7 @@
                 {
                     @foreach (var entry in FilteredEntries)
                     {
-                        <tr>
+                        <tr class="@(excludedEntryIds.Contains(entry.Id) ? "entry-excluded" : "")">
                             <td>@GetEntryName(entry)</td>
                             <td>@GetEntryCategoryLabel(entry)</td>
                             <td>@FormatPeriod(entry)</td>
@@ -126,6 +133,12 @@
                                     </div>
                                 </td>
                             }
+                            <td class="filter-col">
+                                <input type="checkbox"
+                                       class="form-check-input"
+                                       checked="@(!excludedEntryIds.Contains(entry.Id))"
+                                       @onchange="@(e => HandleEntryInclusionChanged(entry, (bool)e.Value!))" />
+                            </td>
                         </tr>
                     }
 
@@ -136,6 +149,7 @@
                         {
                             <td></td>
                         }
+                        <td></td>
                     </tr>
                 }
             </tbody>
@@ -145,6 +159,7 @@
 
 @code {
     private readonly ExpenseTableFilter filter = new();
+    private readonly HashSet<Guid> excludedEntryIds = new();
     private ExpenseQueryScope lastResolvedScope;
     private bool defaultDateRangeApplied;
     private bool pendingDateFilterLoad = true;
@@ -184,7 +199,8 @@
     public bool UseScopedDateRangeForShowAllCosts { get; set; }
 
     private IReadOnlyList<ExpenseEntry> FilteredEntries => AppState.GetFilteredExpenseEntries(filter);
-    private decimal FilteredTotal => FilteredEntries.Sum(entry => entry.Amount);
+    private decimal FilteredTotal => FilteredEntries.Where(e => !excludedEntryIds.Contains(e.Id)).Sum(e => e.Amount);
+    private bool AllEntriesIncluded => FilteredEntries.Count == 0 || FilteredEntries.All(e => !excludedEntryIds.Contains(e.Id));
     private bool ShowTransportVehicleActions => Scope == ExpenseQueryScope.Transport && TransportVehicles.Count > 0;
 
     private IReadOnlyList<ExpenseFilterCategoryOption> CategoryOptions => AppState.GetExpenseFilterCategoryOptions(filter);
@@ -327,6 +343,28 @@
         });
     }
 
+    private void HandleEntryInclusionChanged(ExpenseEntry entry, bool included)
+    {
+        if (included)
+            excludedEntryIds.Remove(entry.Id);
+        else
+            excludedEntryIds.Add(entry.Id);
+    }
+
+    private void HandleToggleAllInclusion()
+    {
+        if (AllEntriesIncluded)
+        {
+            foreach (var entry in FilteredEntries)
+                excludedEntryIds.Add(entry.Id);
+        }
+        else
+        {
+            foreach (var entry in FilteredEntries)
+                excludedEntryIds.Remove(entry.Id);
+        }
+    }
+
     private static string GetDateFilterStorageKey(ExpenseQueryScope scope) => $"budget-advisor.expense-records.date-filter.{scope}";
 
     private string GetEntryName(ExpenseEntry entry) => AppState.GetExpenseDescriptionDisplay(entry);
@@ -353,7 +391,7 @@
             : trimmedName[..6];
     }
 
-    private int GetColumnCount() => OnDelete.HasDelegate ? 5 : 4;
+    private int GetColumnCount() => OnDelete.HasDelegate ? 6 : 5;
 
     private sealed class PersistedExpenseDateFilter
     {
@@ -370,5 +408,14 @@
 
     .vehicle-tag-button {
         min-width: 4.5rem;
+    }
+
+    .filter-col {
+        width: 2.5rem;
+        text-align: center;
+    }
+
+    .entry-excluded td {
+        opacity: 0.4;
     }
 </style>

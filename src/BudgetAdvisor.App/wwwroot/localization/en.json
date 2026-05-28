@@ -743,6 +743,7 @@
     "common.unknown": "Unknown",
     "common.openEnded": "Open ended",
     "table.sum": "Total",
+    "table.includeAllInSum": "Include all in sum",
     "common.yes": "Yes",
     "common.no": "No",
     "common.notFound": "Page not found",

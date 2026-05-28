@@ -743,6 +743,7 @@
     "common.unknown": "Okänd",
     "common.openEnded": "Utan slutdatum",
     "table.sum": "Summa",
+    "table.includeAllInSum": "Inkludera alla i summa",
     "common.yes": "Ja",
     "common.no": "Nej",
     "common.notFound": "Sidan hittades inte",
